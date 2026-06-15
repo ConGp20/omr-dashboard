@@ -1,0 +1,46 @@
+# OMR Dashboard — production compose.
+#
+# Both services use host networking so the backend can reach the existing
+# omr-admin API on 127.0.0.1:65500 and the frontend can be bound to the
+# WireGuard management tunnel IP only (never the public interface).
+#
+# Set BIND_ADDR in .env to your WireGuard tunnel IP (e.g. 10.255.247.1) so the
+# dashboard is reachable only through the router. Default 127.0.0.1 keeps it
+# local-only (reach it via an SSH tunnel during first setup).
+services:
+  backend:
+    build: ./backend
+    image: omr-dashboard-backend:latest
+    network_mode: host
+    environment:
+      OMR_DASHBOARD_DEMO: "${OMR_DASHBOARD_DEMO:-false}"
+      OMR_DASHBOARD_OMR_ADMIN_URL: "https://127.0.0.1:65500"
+      OMR_DASHBOARD_OMR_ADMIN_KEY: "${OMR_ADMIN_KEY:-}"
+      OMR_DASHBOARD_ROUTER_IP: "${ROUTER_IP:-192.168.100.1}"
+      OMR_DASHBOARD_ROUTER_USER: "${ROUTER_USER:-root}"
+      OMR_DASHBOARD_ROUTER_PASS: "${ROUTER_PASS:-}"
+      OMR_DASHBOARD_JWT_SECRET: "${JWT_SECRET:-change-me}"
+      OMR_DASHBOARD_DASHBOARD_PASS: "${DASHBOARD_PASS:-}"
+    command: >
+      uvicorn omr_dashboard_api:app --host 127.0.0.1 --port 65501
+    volumes:
+      - /etc/openmptcprouter-vps-admin:/etc/omr-admin:ro
+      - /etc/shorewall:/etc/shorewall
+      - omr_dashboard_data:/var/opt/omr-dashboard
+    restart: unless-stopped
+
+  frontend:
+    build: ./frontend
+    image: omr-dashboard-frontend:latest
+    network_mode: host
+    depends_on:
+      - backend
+    environment:
+      # Backend listens locally on 65501 (see backend command above).
+      BACKEND_URL: "http://127.0.0.1:65501"
+      HOSTNAME: "${BIND_ADDR:-127.0.0.1}"
+      PORT: "3000"
+    restart: unless-stopped
+
+volumes:
+  omr_dashboard_data:
