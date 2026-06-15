@@ -10,7 +10,7 @@ from fastapi.responses import Response
 
 from auth import require_user
 from config import get_settings
-from schemas import ComponentVersion, VersionsResponse
+from schemas import ComponentVersion, PortForward, VersionsResponse
 from services import backup_service
 from services.omr_proxy import OmrProxy
 from services.router_proxy import RouterProxy
@@ -116,7 +116,6 @@ async def restore(file: UploadFile, password: str = Form(...), _: str = Depends(
     # Re-apply port forwardings and exit-vpn from the backup.
     applied: list[str] = []
     sw = ShorewallService()
-    from schemas import PortForward
     for pf in data["vps"].get("port_forwardings", []):
         sw.add_forward(PortForward(**pf))
         applied.append(f"Port-Weiterleitung {pf.get('src_port')}")

@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import json
 import os
+import time
+from pathlib import Path
 from typing import Any, Optional
 
 import httpx
 
 from config import get_settings
-from schemas import DashboardStatus, ProtocolInfo
+from schemas import BondState, DashboardStatus, ProtocolInfo, TunnelStatus
 from services import demo_data
 
 # Plain-language metadata for each protocol the VPS can run.
@@ -103,10 +105,9 @@ class OmrProxy:
         """Read the active protocol from the VPS state file."""
         if self.settings.demo:
             return "glorytun_tcp"
-        path = "/etc/openmptcprouter-vps-admin/current-vpn"
+        path = Path(self.settings.omr_admin_config).parent / "current-vpn"
         try:
-            with open(path) as fh:
-                return fh.read().strip()
+            return path.read_text().strip()
         except OSError:
             return "glorytun_tcp"
 
@@ -121,17 +122,16 @@ class OmrProxy:
 
     def _map_status(self, raw: dict) -> DashboardStatus:
         # Minimal mapping; router_proxy fills in link details in the aggregator.
-        from schemas import BondState, TunnelStatus
-
         vpn = self.current_vpn()
         up = bool(raw)
         tunnel = TunnelStatus(protocol=vpn, up=up)
+        config_path = Path(self.settings.omr_admin_config).parent / "current-vpn"
         return DashboardStatus(
-            configured=os.path.exists("/etc/openmptcprouter-vps-admin/current-vpn"),
+            configured=config_path.exists(),
             state=BondState.bonded if up else BondState.offline,
             tunnel=tunnel,
             vps_public_ip=raw.get("public_ip") if isinstance(raw, dict) else None,
-            timestamp=__import__("time").time(),
+            timestamp=time.time(),
         )
 
     async def protocols(self) -> list[ProtocolInfo]:

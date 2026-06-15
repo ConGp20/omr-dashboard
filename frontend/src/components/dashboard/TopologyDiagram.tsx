@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import ReactFlow, {
   Background,
   Controls,
@@ -79,7 +79,7 @@ export function TopologyDiagram() {
     [topo],
   );
 
-  const onNodeClick = (_: unknown, node: Node) => {
+  const onNodeClick = (_evt: React.MouseEvent, node: Node) => {
     const target: Record<string, string> = {
       wan: "/links",
       router: "/links",

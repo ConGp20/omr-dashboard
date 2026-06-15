@@ -56,7 +56,6 @@ class MetricsStore:
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
-        self._lock = asyncio.Lock()
 
     # --- writes ------------------------------------------------------------
     async def record_links(self, links: list[LinkStatus]) -> None:

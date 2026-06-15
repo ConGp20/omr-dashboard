@@ -21,6 +21,7 @@ from schemas import (
     DashboardStatus,
     Event,
     LinkState,
+    LinkStatus,
     PortForward,
     TopoEdge,
     TopoNode,
@@ -103,7 +104,6 @@ class Aggregator:
         # In real mode, enrich with router-reported per-link metrics.
         if not self.settings.demo and not status.links:
             wans = await self.router.detect_wans()
-            from schemas import LinkStatus
             status.links = [
                 LinkStatus(
                     id=w.id, label=w.label or w.id, type=w.detected_type,
