@@ -1,0 +1,26 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+
+# Local env / data
+.env
+.env.local
+data/
+*.db
+*.db-wal
+*.db-shm
+
+# Editor
+.DS_Store
