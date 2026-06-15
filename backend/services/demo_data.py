@@ -63,7 +63,8 @@ def link_status() -> list[LinkStatus]:
         rx = max(0.0, link["cap_rx"] * (load + jitter))
         tx = max(0.0, link["cap_tx"] * (load + jitter) * 0.7)
         latency = link["base_lat"] + 6 * _wave(13 + idx * 3) + random.uniform(-1.5, 1.5)
-        loss = max(0.0, (0.3 if idx == 2 else 0.05) * _wave(31 + idx))
+        # Loss in percent (0–5 range); 5G link occasionally spikes higher.
+        loss = max(0.0, (5.0 if idx == 2 else 0.8) * _wave(31 + idx))
 
         state = LinkState.up
         if loss > 1.0 or latency > 100:

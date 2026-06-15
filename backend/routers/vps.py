@@ -63,9 +63,13 @@ async def get_exit_vpn(_: str = Depends(require_user)) -> ExitVpn:
     return WireguardService().get_exit_vpn()
 
 
-@router.put("/exit-vpn", response_model=ExitVpn)
-async def set_exit_vpn(config: ExitVpn, _: str = Depends(require_user)) -> ExitVpn:
-    return WireguardService().set_exit_vpn(config)
+@router.put("/exit-vpn")
+async def set_exit_vpn(config: ExitVpn, _: str = Depends(require_user)) -> dict:
+    result, warning = WireguardService().set_exit_vpn(config)
+    out = result.model_dump()
+    if warning:
+        out["warning"] = warning
+    return out
 
 
 # --- nat / routing -------------------------------------------------------- #

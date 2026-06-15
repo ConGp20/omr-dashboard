@@ -34,8 +34,19 @@ from services.aggregator import Aggregator
 from services.metrics_store import MetricsStore
 
 
+_DEFAULT_JWT_SECRET = "change-me-in-production"
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: FastAPI):
+    import logging
+
+    settings = get_settings()
+    if not settings.demo and settings.jwt_secret == _DEFAULT_JWT_SECRET:
+        logging.getLogger("omr_dashboard").warning(
+            "JWT_SECRET is the default placeholder — set a strong random value in .env"
+        )
+
     store = MetricsStore()
     aggregator = Aggregator(store)
     deps.init(store, aggregator)

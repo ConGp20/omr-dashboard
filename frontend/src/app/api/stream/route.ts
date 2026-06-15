@@ -22,7 +22,13 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const reader = upstream.body!.getReader();
+  if (!upstream.body) {
+    return new Response("event: error\ndata: {}\n\n", {
+      status: 502,
+      headers: { "Content-Type": "text/event-stream" },
+    });
+  }
+  const reader = upstream.body.getReader();
 
   const stream = new ReadableStream({
     async start(controller) {

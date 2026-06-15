@@ -36,7 +36,7 @@ class WireguardService:
         except (OSError, json.JSONDecodeError, TypeError):
             return ExitVpn()
 
-    def set_exit_vpn(self, config: ExitVpn) -> ExitVpn:
+    def set_exit_vpn(self, config: ExitVpn) -> tuple["ExitVpn", str]:
         # Preserve a previously stored private key if the client didn't resend it.
         if not config.private_key and os.path.exists(self._path):
             try:
@@ -46,18 +46,20 @@ class WireguardService:
                 pass
         with open(self._path, "w") as fh:
             json.dump(config.model_dump(), fh)
+        warning = ""
         if not self.settings.demo:
-            self._apply(config)
+            warning = self._apply(config)
         result = config.model_copy()
         result.private_key = None
-        return result
+        return result, warning
 
-    def _apply(self, config: ExitVpn) -> None:
+    def _apply(self, config: ExitVpn) -> str:
+        """Apply the WireGuard config. Returns a warning string on non-fatal failure."""
         try:
             if not config.enabled or config.type != "wireguard":
                 subprocess.run(["wg-quick", "down", _WG_IFACE], check=False,
                                capture_output=True, timeout=30)
-                return
+                return ""
             conf = self._render_wg_conf(config)
             conf_path = f"/etc/wireguard/{_WG_IFACE}.conf"
             os.makedirs("/etc/wireguard", exist_ok=True)
@@ -66,10 +68,15 @@ class WireguardService:
             os.chmod(conf_path, 0o600)
             subprocess.run(["wg-quick", "down", _WG_IFACE], check=False,
                            capture_output=True, timeout=30)
-            subprocess.run(["wg-quick", "up", _WG_IFACE], check=False,
-                           capture_output=True, timeout=30)
-        except (FileNotFoundError, subprocess.SubprocessError, OSError):
-            pass
+            r = subprocess.run(["wg-quick", "up", _WG_IFACE], check=False,
+                               capture_output=True, timeout=30)
+            if r.returncode != 0:
+                return r.stderr.decode(errors="replace").strip() or "wg-quick up fehlgeschlagen"
+            return ""
+        except FileNotFoundError:
+            return "wg-quick nicht gefunden — WireGuard ist nicht installiert"
+        except (subprocess.SubprocessError, OSError) as exc:
+            return str(exc)
 
     def _render_wg_conf(self, config: ExitVpn) -> str:
         lines = [

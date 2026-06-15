@@ -93,9 +93,17 @@ class RouterProxy:
                     return None
                 # result == [code, payload]; code 0 == ok
                 if result[0] != 0:
-                    # session likely expired; retry once
+                    # Session expired — refresh and retry the call once.
                     self._session = await self._login()
-                    return None
+                    if self._session is None:
+                        return None
+                    payload["params"][0] = self._session
+                    resp2 = await client.post(self._url, json=payload)
+                    data2 = resp2.json()
+                    result = data2.get("result") or []
+                    if not result or result[0] != 0:
+                        return None
+                    return result[1] if len(result) > 1 else {}
                 return result[1] if len(result) > 1 else {}
         except Exception:
             return None

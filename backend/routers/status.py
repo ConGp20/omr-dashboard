@@ -25,7 +25,7 @@ async def get_topology(_: str = Depends(require_user)) -> Topology:
 
 
 @router.get("/stream")
-async def stream(request: Request) -> StreamingResponse:
+async def stream(request: Request, _: str = Depends(require_user)) -> StreamingResponse:
     """SSE stream pushing the full status payload on every poll tick."""
     agg = get_aggregator()
 
