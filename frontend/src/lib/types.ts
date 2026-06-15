@@ -130,6 +130,18 @@ export interface FirewallRule {
   enabled: boolean;
 }
 
+export interface DomainRule {
+  id?: string | null;
+  domain: string;
+  target: string;
+}
+
+export interface DnsConfig {
+  upstream: string[];
+  mode: "classic" | "doh" | "dot";
+  local_entries: { hostname: string; ip: string }[];
+}
+
 export interface MetricPoint {
   ts: number;
   link_id: string;
