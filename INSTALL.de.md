@@ -10,7 +10,65 @@ Wege gegliedert — wähle den, der zu Dir passt:
 
 Danach: **[Der Einrichtungs-Wizard Schritt für Schritt](#der-einrichtungs-wizard-schritt-für-schritt)**,
 **[Zugriff absichern](#zugriff-absichern-tunnel-statt-öffentlich)**,
-**[Fehlersuche](#fehlersuche)** und **[Update / Backup](#update--backup)**.
+**[Fehlersuche](#fehlersuche)**, **[Update / Backup](#update--backup)** und
+**[Eigene Firewall hinter dem OMR-Router](#eigene-firewall-hinter-dem-omr-router-einrichten)**.
+
+---
+
+## Komplettanleitung in 12 Schritten (Kurzfassung)
+
+Wer einfach der Reihe nach klicken/tippen will, ohne erst alle Abschnitte zu
+lesen — die folgenden 12 Schritte sind der vollständige Weg von einem leeren
+VPS bis zum laufenden Dashboard samt Router. Jeder Schritt verlinkt auf den
+ausführlichen Abschnitt, falls etwas schiefgeht.
+
+1. **VPS mit OpenMPTCProuter-VPS-Komponente installieren** (falls noch nicht
+   geschehen) — das normale OMR-VPS-Install-Script, unabhängig vom Dashboard.
+   Danach läuft `omr-admin` auf Port 65500 und es existiert
+   `/root/openmptcprouter_config.txt` mit dem **Server-Key**.
+2. **Server-Key notieren**: `cat /root/openmptcprouter_config.txt` auf dem
+   VPS — diesen Wert brauchst Du in Schritt 7 (Wizard) als „omr_key".
+3. **Dashboard mitinstallieren**, im selben Verzeichnis wie
+   `debian12-x86_64.sh` auf dem VPS:
+   ```bash
+   DASHBOARD=yes DASHBOARD_BIND=127.0.0.1 ./debian12-x86_64.sh
+   ```
+   → Details: [Weg 1](#weg-1--automatisch-über-das-vps-install-script).
+4. **⚠️ `ROUTER_PASS` sofort prüfen.** Das Script schreibt diesen Wert immer
+   leer in `/opt/openmptcprouter-vps/dashboard/.env`, weil der Router beim
+   VPS-Setup meist noch nicht existiert. Live-Linkmetriken vom Router
+   funktionieren erst, wenn Du ihn nachträgst (Schritt 9). Das ist normal —
+   nicht abbrechen, einfach merken und später erledigen.
+5. **Per SSH-Tunnel auf das Dashboard zugreifen** (der WireGuard-Management-
+   Tunnel existiert noch nicht, solange kein Router verbunden ist):
+   ```bash
+   ssh -L 3000:127.0.0.1:3000 root@<VPS-IP>
+   ```
+   Dann im Browser: `http://localhost:3000`.
+6. **Router (OpenMPTCProuter-Image) aufsetzen/flashen und ins LAN des VPS-
+   Zugangs hängen**, falls noch nicht geschehen — eigener, OMR-Router-
+   spezifischer Schritt, nicht Teil des Dashboards.
+7. **Wizard Schritt 1–2**: „Neu einrichten" wählen, VPS-IP/Domain +
+   Server-Key (aus Schritt 2) eingeben, **Verbindung testen**.
+8. **Wizard Schritt 3**: Router-IP (Standard `192.168.100.1`),
+   LuCI-Benutzer (`root`) und das **aktuelle Router-Passwort** eingeben →
+   **Leitungen erkennen**. Erkannte WANs benennen, Typ zuweisen.
+9. **`ROUTER_PASS` jetzt in der `.env` nachtragen** (das Passwort aus
+   Schritt 8 kennst Du jetzt):
+   ```bash
+   cd /opt/openmptcprouter-vps/dashboard
+   nano .env        # ROUTER_PASS=<dein-LuCI-Passwort>
+   docker compose up -d
+   ```
+   Ohne diesen Schritt zeigt das Dashboard Leitungen ohne Live-Metriken an.
+10. **Wizard Schritt 4–6**: Protokoll wählen, LAN-Konfiguration bestätigen,
+    **Jetzt verbinden** → Tunnel wird aufgebaut, kurzer Geschwindigkeitstest.
+11. **Zugriff dauerhaft absichern**: sobald der Tunnel steht, `BIND_ADDR` in
+    der `.env` auf die WireGuard-Management-Tunnel-IP setzen (statt
+    `127.0.0.1`/SSH-Tunnel) → [Zugriff absichern](#zugriff-absichern-tunnel-statt-öffentlich).
+12. **Optional: eigene Firewall statt OMR-DHCP** — falls Du (wie die meisten)
+    eine eigene Firewall mit ihrem WAN-Port an den OMR-Router anschließt →
+    [Eigene Firewall hinter dem OMR-Router einrichten](#eigene-firewall-hinter-dem-omr-router-einrichten).
 
 ---
 
@@ -304,6 +362,55 @@ werden AES-256-GCM verschlüsselt, nie im Klartext). Wiederherstellen über
 
 ---
 
+## Eigene Firewall hinter dem OMR-Router einrichten
+
+Die meisten Nutzer betreiben den OMR-Router nicht als alleinigen
+Heimnetz-Router, sondern hängen ihre eigentliche Firewall (OPNsense,
+pfSense, Sophos, Fritzbox …) mit deren **WAN-Port** an einen LAN-Port des
+OMR-Routers. Das funktioniert heute schon, braucht aber etwas händische
+Konfiguration und führt zu einer (harmlosen) Doppel-NAT-Situation:
+
+```
+Internet → VPS (öffentliche IP) → Tunnel → OMR-Router → Firewall → Dein LAN
+```
+
+**So richtest Du es ein:**
+
+1. **OMR-DHCP auf dem LAN-Port deaktivieren**, an dem die Firewall hängt —
+   sonst vergibt sowohl der OMR-Router als auch die Firewall IP-Adressen,
+   das kollidiert. In LuCI: *Network → Interfaces → LAN → DHCP Server →
+   „Ignore interface"* aktivieren. (Eine direkte Dashboard-Schaltfläche dafür
+   ist geplant, siehe `dashboard/docs/routing-plan.de.md`, Abschnitt 9.3 —
+   bis dahin über LuCI.)
+2. **Firewall mit einer statischen IP im OMR-LAN-Subnetz konfigurieren**,
+   z. B. OMR-Router `192.168.100.1`, Firewall-WAN `192.168.100.2/24`,
+   Gateway `192.168.100.1`. Nicht per DHCP beziehen lassen.
+3. **Port-Weiterleitung für eingehende Verbindungen zur Firewall einrichten**,
+   falls die Firewall selbst von außen erreichbar sein soll (z. B. für ihr
+   eigenes WireGuard/IPsec): im Dashboard unter **VPS-Endpunkt → Port-
+   Weiterleitungen** eine neue Regel anlegen, Ziel über den Topologie-Picker
+   auswählen (die Firewall erscheint dort, sobald sie im LAN aktiv ist) statt
+   die IP händisch zu tippen.
+4. **DDNS auf der Firewall: „externe IP-Ermittlung" statt „WAN-Schnittstelle"
+   wählen.** Deine Firewall zeigt als „WAN-IP" die private OMR-LAN-Adresse
+   (`192.168.100.2`) — das ist normal und kein Fehler. Für DDNS auf der
+   Firewall den Modus wählen, der die öffentliche IP über einen externen
+   Prüfdienst ermittelt (bei den meisten Firewall-Betriebssystemen die
+   Standardeinstellung oder leicht umstellbar) — dieser sieht korrekt die
+   echte VPS-Public-IP, weil darüber der gesamte gebündelte Traffic das
+   Internet erreicht.
+5. **VPS-Public-IP zum Abgleich**: im Dashboard unter **VPS-Endpunkt → NAT**
+   wird die aktuelle öffentliche IPv4/IPv6 des VPS angezeigt — damit lässt
+   sich die DDNS-Auflösung der Firewall jederzeit verifizieren.
+
+**Was damit (noch) nicht geht:** ein echtes, NAT-freies Durchreichen einer
+*eigenen* öffentlichen IP an die Firewall-WAN-Schnittstelle (also ohne
+Doppel-NAT, wie an einem klassischen Modem) ist eine größere, noch nicht
+umgesetzte Erweiterung — Konzept und Aufwand dazu stehen in
+`dashboard/docs/routing-plan.de.md`, Abschnitt 9.2 („Stufe 3").
+
+---
+
 ## Bekannte Einschränkungen (ehrlich)
 
 - **Nur Demo-Modus end-to-end verifiziert.** Die Live-Pfade (omr-admin,
@@ -316,3 +423,13 @@ werden AES-256-GCM verschlüsselt, nie im Klartext). Wiederherstellen über
 - **LuCI-Menüeintrag** „OMR Dashboard" auf dem Router ist eine Image-Änderung im
   Repo `openmptcprouter` und nicht Teil dieses Sidecars. Für den Zugriff genügt
   `BIND_ADDR:3000` bzw. der SSH-Tunnel.
+- **Zugangsdaten (`ROUTER_PASS`, `OMR_ADMIN_KEY`, `JWT_SECRET`, …) sind aktuell
+  nur über `.env` + Container-Neustart änderbar** — es gibt noch keine
+  Settings-Seite im Dashboard dafür (geplant, siehe
+  `dashboard/docs/routing-plan.de.md`, Abschnitt 8/10). Bis dahin: Werte in
+  `.env` anpassen und `docker compose up -d` ausführen, wie in
+  [Schritt 9 der Kurzanleitung](#komplettanleitung-in-12-schritten-kurzfassung)
+  beschrieben.
+- **Echtes IP-Passthrough an eine eigene Firewall** (ohne Doppel-NAT) ist noch
+  nicht umgesetzt — siehe
+  [Eigene Firewall hinter dem OMR-Router einrichten](#eigene-firewall-hinter-dem-omr-router-einrichten).

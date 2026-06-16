@@ -7,6 +7,22 @@ Verkehr am VPS-Endpunkt. Dient als Grundlage für eine spätere
 Implementierungs-Phase (siehe `Phasenplan` unten); keine Codeänderung in
 diesem Schritt.
 
+Erweitert um drei zusätzliche, eng verwandte Themen, die in der Praxis nicht
+von der reinen Regel-Engine zu trennen sind:
+
+- **Abschnitt 7**: welche Anpassungen tatsächlich serverseitig nötig sind —
+  getrennt nach VPS-Betriebssystem, Router-Firmware (anderes Repo) und
+  upstream `omr-admin` (anderes Projekt) — statt allem implizit dem
+  Dashboard-Backend zuzuschreiben.
+- **Abschnitt 8**: ein ehrlicher Audit, welche der heute nur im Wizard
+  gesetzten Werte (VPS-IP, Router-Zugangsdaten, LAN-Konfiguration, Secrets)
+  danach tatsächlich im Dashboard wieder änderbar sind — und ein konkreter
+  Plan, das für alles technisch Mögliche nachzurüsten.
+- **Abschnitt 9**: die in der Praxis sehr häufige Topologie „eigene Firewall
+  hinter dem OMR-Router" (statt OMR als alleinigem Heimnetz-Router) —
+  inklusive einer direkten Antwort auf die Frage, ob/wie die öffentliche
+  VPS-IP an diese Firewall durchgereicht werden kann.
+
 ## 1. Ausgangslage (heutiger Stand)
 
 | Bereich | Heute | Datei |
@@ -50,6 +66,13 @@ behält — bestehende UI/Wizard-Flows bleiben unverändert funktionsfähig.
    Routing, MPTCP-Scheduler für Link-Auswahl), wird dieser angesteuert statt
    parallel neu gebaut — das Dashboard bleibt eine Bedienoberfläche für
    bestehende OMR-Mechanismen, kein Ersatz dafür.
+7. **Alles, was der Wizard einmalig setzt, muss danach im Dashboard wieder
+   änderbar sein** — keine Werte, die nur über manuelles `.env`-Editieren plus
+   Container-Neustart korrigierbar sind. Wo eine Änderung technisch zwingend
+   einen Neustart erfordert (z. B. `BIND_ADDR`, da es die Docker-Netzwerk-
+   Bindung betrifft), zeigt die UI das ehrlich an, statt den Eindruck einer
+   Live-Übernahme zu erwecken. Details und eine konkrete Lücken-Bestandsaufnahme
+   in Abschnitt 10.
 
 ## 3. Neues Datenmodell
 
@@ -243,8 +266,213 @@ Routing-Tabellen).
   `IngressRule` bzw. ein `EgressProfile` + eine Default-`EgressRule`
   überführt werden (One-Time-Migration in `routing_service.__init__`).
 
-## 7. Phasenplan (Umsetzung, falls beschlossen)
+## 7. Serverseitige Anpassungen — Bestandsaufnahme & Lücken
 
+Dieser Abschnitt trennt explizit, was reine Dashboard-Arbeit ist (Backend-
+Service + Frontend, beides in diesem Repo) von dem, was tatsächlich auf dem
+VPS-System, im Router-Firmware-Repo (`congp20/openmptcprouter`) oder im
+upstream `omr-admin` (`Ysurac/openmptcprouter-vps-admin`) angepasst werden
+muss — das war im bisherigen Plan implizit, wird hier konkret.
+
+### 7.1 VPS-seitig (Betriebssystem-Ebene, außerhalb von Docker)
+
+| Änderung | Warum nötig | Wo |
+|---|---|---|
+| Zusätzliche `ip rule`/`ip route`-Tabellen pro Egress-Profil | Mehrere gleichzeitige Exit-Pfade (Abschnitt 3.1) | neu: `policy_renderer.py` führt `ip route`/`ip rule` aus, Tabellen-IDs in `/etc/iproute2/rt_tables` registrieren |
+| Mehrere `wg-quick`-Interfaces (`omr-exit-<id>`) statt nur `omr-exit` | ein Interface pro Egress-Profil | Erweiterung von `wireguard_service.py`, eigene `.conf`-Dateien pro Profil |
+| `iptables -t mangle` Markierungsregeln (fwmark) | Pakete den `EgressRule`-Bedingungen zuordnen, bevor Policy-Routing greift | neu: `policy_renderer.py` |
+| Shorewall: Portbereiche, `statistic`-Match für Lastverteilung, Quell-CIDR-Spalte, `tcrules` für Rate-Limit | Ingress-Granularität (Abschnitt 3.2) | Erweiterung von `shorewall_service.py`, ggf. zusätzliche Shorewall-Konfigdateien (`tcrules`) statt nur `rules` |
+| `shorewall check` als Preflight vor `restart` | Trockenlauf-Prinzip (Leitprinzip 3) | `shorewall_service._apply()` |
+| Persistente, **verschlüsselte** Konfigurationsablage für Secrets, die heute nur als Klartext-Env-Var existieren (`omr_admin_key`, `router_pass`, `jwt_secret`) | Voraussetzung für Abschnitt 10 (nachträgliche Änderbarkeit) | neuer `settings_service.py`, gleiches AES-256-GCM-Muster wie `backup_service.py` |
+
+### 7.2 Router-seitig (LuCI/UCI/OpenWrt, Repo `congp20/openmptcprouter`)
+
+Diese Punkte sind **keine Dashboard-Codeänderung**, sondern betreffen das
+Router-Firmware-Repo — werden hier aufgeführt, weil sie Voraussetzung für
+Dashboard-Features sind:
+
+| Änderung | Warum nötig | Aufwand |
+|---|---|---|
+| `network.lan.dhcp.ignore` per ubus/UCI aus dem Dashboard heraus setzbar | DHCP-Server an/aus für den "Eigene Firewall im LAN"-Modus (Abschnitt 9) | klein — `router_proxy.py` braucht nur einen neuen `uci_set`-Aufruf, UCI-Schema existiert in OpenWrt bereits |
+| Neues "WAN-Passthrough"-Interface-Konzept (eigenes Netzwerk-Segment ohne NAT/Firewalling Richtung LAN) | echtes IP-Passthrough einer zusätzlichen öffentlichen IP/Präfix zur Firewall (Abschnitt 9.3, Stufe 3) | **groß** — echte Firmware-/UCI-Schema-Änderung, eigenes Vorhaben im Router-Repo, nicht Teil dieses Dashboard-Plans |
+| NDP-Proxy/Routed-/64-Weiterleitung für IPv6-Präfix-Delegation | IPv6-Passthrough zur Firewall (pragmatischere Variante von Stufe 3) | mittel — bestehende OpenWrt-Pakete (`odhcpd`, `ndppd`) lassen sich per UCI ansteuern, aber Dashboard muss diese UCI-Sektion kennen und schreiben können |
+| LuCI-Menüeintrag „OMR Dashboard" | reine Erreichbarkeits-Komfortfrage, unabhängig von diesem Plan | bereits in der ursprünglichen Projektplanung als offener Punkt vermerkt |
+
+### 7.3 Upstream `omr-admin` (Repo `Ysurac/openmptcprouter-vps-admin`)
+
+Für reines Editieren bestehender Werte (Abschnitt 10) ist **keine** Änderung
+an `omr-admin.py` nötig — das Dashboard spricht es bereits über
+`OmrProxy`/Port 65500 an. Erst wenn das granulare Egress-Modell (Abschnitt 3.1)
+*mehrere* aktive Protokoll-Instanzen gleichzeitig auf dem VPS verlangt (z. B.
+Glorytun TCP *und* ein zweiter, unabhängiger Tunnel für ein zweites
+Egress-Profil), müsste geprüft werden, ob `omr-admin` das überhaupt zulässt
+— heute ist pro VPS genau ein aktives Tunnelprotokoll vorgesehen
+(`OmrProxy.switch_protocol`). **Das ist eine offene Abhängigkeit, kein
+gelöstes Problem** — ggf. muss das granulare Egress-Routing zunächst auf
+*einen* Tunnel beschränkt bleiben und nur die VPS-seitige *Weiterleitung nach
+dem Tunnel* (also reines Exit-Routing der schon gebündelten Verbindung)
+granular werden, nicht der Tunnel-Layer selbst. Diese Einschränkung gehört in
+die UI-Texte, damit keine falschen Erwartungen entstehen.
+
+### 7.4 Install-Script (`debian12-x86_64.sh`)
+
+Bekannte, bisher nur dokumentierte (nicht behobene) Lücke: das Script
+schreibt `ROUTER_PASS=` immer leer in die generierte `.env` (siehe Zeile
+~1172), weil das Router-Passwort zum Zeitpunkt der VPS-Installation meist
+noch nicht bekannt ist (der Router existiert ja oft noch nicht). Zwei
+Verbesserungen, beide klein:
+
+1. Interaktive Abfrage am Script-Ende: *"Router-Passwort jetzt eintragen?
+   (kann später im Dashboard nachgeholt werden) [j/N]"*.
+2. Deutlicherer Hinweis direkt in der Script-Ausgabe (nicht nur in
+   `INSTALL.de.md`), z. B. `echo`-Zeile direkt nach dem Start des Containers.
+
+Mit der in Abschnitt 10 geplanten Settings-Seite wird Punkt 1 ohnehin
+entschärft — das Passwort lässt sich dann bequem im Dashboard nachtragen,
+ohne `.env` händisch zu editieren und Container neu zu starten.
+
+## 8. Nachträgliche Änderbarkeit — Audit aller Wizard-Werte
+
+Konkrete Umsetzung von Leitprinzip 7. Heutiger Stand pro Wert:
+
+| Wert | Heute nachträglich änderbar? | Geplante Lösung |
+|---|---|---|
+| VPS-IP | Nur einmalig im Wizard; wird ins Router-UCI geschrieben, nicht im Dashboard selbst gespeichert | Neue „Verbindung"-Karte unter `/system`: Feld erneut bearbeitbar, „Erneut anwenden" schreibt erneut ins Router-UCI (ruft intern dieselbe Logik wie `wizard.apply` Schritt 2 auf) |
+| `OMR_ADMIN_KEY` | Nur über `.env` + Container-Neustart | Settings-Seite, **sofort wirksam** ohne Neustart: Wert landet in der neuen verschlüsselten Settings-Ablage, `get_settings.cache_clear()` plus `os.environ`-Update reicht, da nur als HTTP-`Authorization`-Header verwendet |
+| `ROUTER_IP` / `ROUTER_USER` / `ROUTER_PASS` | Nur über `.env` + Container-Neustart | Settings-Seite mit **Verbindungstest-Button** (ruft `wizard.detect_wans` testweise auf, bevor gespeichert wird) — sofort wirksam wie oben |
+| Tunnelprotokoll | ✅ bereits über `/protocols` änderbar | — |
+| WAN-Label/Typ/Priorität | ✅ bereits über `/links` änderbar | — |
+| LAN-IP / DHCP-Bereich | Nur im Wizard gesetzt, danach in keiner Dashboard-Seite mehr sichtbar oder editierbar | Neue Karte „Netzwerk" unter `/system` (oder eigene `/network`-Seite), schreibt erneut per `uci_set` auf den Router |
+| Exit-VPN | ✅ bereits über `/vps` änderbar | — |
+| Port-Weiterleitungen | ✅ bereits über `/vps` änderbar | — |
+| `JWT_SECRET` | Nur über `.env` + Neustart | Settings-Seite „Sicherheit"; **mit Warnhinweis**, dass ein Wechsel alle aktiven Dashboard-Sessions abmeldet — ehrlich anzeigen, nicht verschleiern |
+| `DASHBOARD_PASS` | Nur über `.env` + Neustart | Settings-Seite „Sicherheit", sofort wirksam |
+| `BIND_ADDR` | Nur über `.env` + `docker compose up -d` (Netzwerkbindung) | Settings-Seite zeigt aktuellen Wert + **klaren Hinweis „erfordert Container-Neustart"** statt eines falschen Live-Apply-Eindrucks; optional ein „Neustart jetzt ausführen"-Button, der intern `docker compose restart` auslöst (setzt Docker-Socket-Zugriff aus dem Backend-Container voraus — Sicherheitsabwägung, siehe Risiken) |
+
+**Architektur-Konsequenz:** `config.py`s `Settings` bleibt die *Default*-Quelle
+(aus Env-Vars beim Start), bekommt aber einen Override-Layer: ein neuer
+`settings_service.py` liest/schreibt eine verschlüsselte JSON-Datei im
+`data_dir` (Muster wie `backup_service.py`), die beim Start *nach* den
+Env-Defaults geladen wird und diese überschreibt. Jede Änderung über die neue
+Settings-API aktualisiert sowohl diese Datei als auch `.env` (für
+Persistenz über einen Container-Neustart hinweg) und ruft
+`get_settings.cache_clear()` auf. `BIND_ADDR`/Ports bleiben die einzige
+ehrliche Ausnahme, die einen Neustart braucht.
+
+## 9. Eigene Firewall hinter dem OMR-Router
+
+### 9.1 Problemstellung
+
+Praxis-Realität: kaum jemand betreibt den OMR-Router als alleinigen
+Heimnetz-Router mit eigenem DHCP für alle Endgeräte. Üblich ist, den
+OMR-Router als reine „Bonding-Bridge" zu betreiben und die eigentliche
+Firewall (OPNsense/pfSense/Sophos/Fritzbox o. ä.) mit ihrem **WAN-Port** an
+einen LAN-Port des OMR-Routers anzuschließen. Damit entsteht IMMER eine Form
+von Doppel-NAT: der OMR-Router NAT't (über den VPS) ins Internet, die
+Firewall NAT't zusätzlich für ihr eigenes LAN. Die Firewall „sieht" als ihre
+WAN-IP nur die private OMR-LAN-Adresse, nicht die echte öffentliche IP des
+VPS — das verwirrt z. B. DDNS-Anzeigen, Site-to-Site-VPN-Konfiguration und
+jede Funktion, die „meine öffentliche IP" voraussetzt.
+
+### 9.2 Direkte Antwort: Kann die VPS-IP an die Firewall übertragen werden?
+
+**Ja, aber in drei Ausbaustufen mit sehr unterschiedlichem Aufwand:**
+
+**Stufe 1 — Doppel-NAT bewusst akzeptieren, aber sauber konfigurieren
+(heute schon möglich, nur UI/Doku-Arbeit).** OMR-DHCP am LAN-Port deaktivieren,
+Firewall bekommt eine statische IP im OMR-LAN-Subnetz (Punkt-zu-Punkt-artig,
+z. B. `192.168.100.1` Router / `192.168.100.2` Firewall). Funktioniert
+zuverlässig, ändert aber nichts an der „falschen" WAN-IP-Anzeige der Firewall
+selbst.
+
+**Stufe 2 — Aufklären statt bauen (kein Code, nur Info-Banner).** Der
+naheliegende Schmerzpunkt — „meine Firewall zeigt die falsche WAN-IP, DDNS
+funktioniert bestimmt nicht" — stimmt in der Praxis meist **nicht**: die
+meisten Firewall-Betriebssysteme ermitteln ihre „öffentliche IP" für DDNS
+nicht von der eigenen (privaten) WAN-Schnittstelle, sondern fragen einen
+externen Check-Dienst ab (z. B. `checkip.dyndns.org`, viele DDNS-Clients haben
+einen „IP automatisch über Internet-Dienst ermitteln"-Modus). Dieser Dienst
+sieht zwangsläufig die **echte VPS-Public-IP**, weil das die Adresse ist, mit
+der der gebündelte Traffic tatsächlich das Internet erreicht. DDNS auf der
+Firewall funktioniert in diesem Modus also bereits **ohne jede Änderung**.
+Das Dashboard sollte das nur sichtbar machen: ein Info-Hinweis auf `/vps`
+("Deine Firewall zeigt vermutlich eine private WAN-IP — das ist normal.
+Deine tatsächliche öffentliche IP ist: `<aktuelle VPS-Public-IP>`, nutze den
+Modus 'externe IP-Ermittlung' für DDNS auf deiner Firewall.").
+
+**Stufe 3 — Echtes IP-Passthrough (substanzielle Neuentwicklung, eigenes
+Vorhaben).** Eine zusätzliche öffentliche IPv4-Adresse (oder ein /29-Block)
+bzw. ein IPv6-/64-Präfix zusätzlich zur Haupt-IP des VPS beim Hoster
+beantragen und diese **unverändert, ohne NAT, ohne Shorewall-DNAT** durch den
+Tunnel bis zur Firewall durchrouten — die Firewall bekommt dann eine
+*tatsächliche* öffentliche IP auf ihrer WAN-Schnittstelle, exakt wie an einem
+klassischen Modem/ONT. Technisch nötig:
+
+- VPS-seitig: `ip route` für die zusätzliche IP/Subnetz über das
+  Tunnel-Interface zur Tunnel-IP des Routers (kein NAT/Masquerading für
+  diese Adresse).
+- Router-seitig (echte Firmware-Änderung im `openmptcprouter`-Repo, **nicht**
+  Teil dieses Dashboard-Plans): ein neues Konzept "WAN-Passthrough-Port" —
+  ein LAN-Port, der die durchgereichte IP unverändert weitergibt, statt sie
+  zu NATen/zu firewallen. Entweder als eigenes VLAN/Transfer-Subnetz
+  (empfohlen, kein Hack nötig) oder per Proxy-ARP, falls Firewall und andere
+  Geräte im selben L2-Segment bleiben müssen.
+- **IPv6 ist der pragmatischere Einstieg**: die meisten VPS-Hoster vergeben
+  großzügige `/64`- oder `/48`-Präfixe ohnehin kostenlos, und natives,
+  NAT-freies Routing eines `/64` per Präfix-Delegation (`odhcpd`/`ndppd`,
+  bereits in OpenWrt vorhanden) ist deutlich weniger invasiv als echtes
+  IPv4-Passthrough.
+
+| Stufe | Aufwand | Voraussetzung | Ergebnis |
+|---|---|---|---|
+| 1 | klein (Dashboard-UI/Doku) | keine | Doppel-NAT, aber stabil und dokumentiert |
+| 2 | sehr klein (Info-Banner) | keine | DDNS/„meine IP"-Funktionen der Firewall funktionieren bereits korrekt — nur sichtbar machen |
+| 3 | groß (Firmware-Änderung + zusätzliche IP/Präfix vom Hoster) | eigenes Vorhaben, vermutlich eigener Plan im Router-Repo `congp20/openmptcprouter` | echtes NAT-freies Passthrough, wie ein klassisches Modem |
+
+### 9.3 Weitere Features für den Einsatz mit eigener Firewall
+
+- **Preset „Eigene Firewall / eigenes NAT"** im Wizard-Schritt 5
+  (LAN-Konfiguration): deaktiviert automatisch den OMR-DHCP-Server und
+  schlägt eine Punkt-zu-Punkt-Adressierung vor, statt dass der Nutzer das
+  manuell in LuCI nachvollziehen muss.
+- **UPnP/NAT-PMP-Relay-Dienst**: nimmt SSDP/UPnP-IGD-Anfragen von Geräten
+  hinter der Firewall entgegen (muss vom Router durchgeleitet werden — kleine
+  router-seitige Anpassung nötig, siehe 7.2) und übersetzt sie automatisch in
+  `IngressRule`s auf dem VPS. Damit funktionieren Spielekonsolen/
+  Torrent-Clients hinter der eigenen Firewall ohne manuelle Port-Weiterleitung
+  im Dashboard — genau das, was ein normaler Heimrouter "automatisch" macht,
+  hier eben am VPS nachgebildet.
+- **Firewall als eigener Topology-Knoten mit Health-Check**: automatischer
+  Ping/Erreichbarkeits-Check der konfigurierten Firewall-IP, sichtbar als
+  Knoten in der Topologie (analog zum bestehenden NAS/Server-Knoten-Muster),
+  farbcodiert nach Status.
+- **MTU-Empfehlung berücksichtigt den zusätzlichen Hop**: das im
+  Ursprungsplan vorgesehene MTU-Finder-Tool muss bei aktiviertem
+  "Eigene Firewall"-Preset den zusätzlichen Kapselungs-/NAT-Hop einrechnen,
+  da die Firewall selbst nochmal fragmentieren/kapseln kann — sonst wird eine
+  MTU empfohlen, die am Endgerät hinter der Firewall wieder zu groß ist.
+- **Bestehendes „Firewall/VPN-Durchleitung"-Ingress-Preset bewusst
+  hervorheben**: das in der ursprünglichen Projektplanung bereits vorgesehene
+  Preset für eingehende VPN-Verbindungen (z. B. eigenes WireGuard/IPsec der
+  Firewall, Port 500/4500/51820 → Firewall-LAN-IP) ist hier der zentrale
+  Baustein für eingehende Verbindungen zur Firewall selbst — keine neue
+  Arbeit nötig, aber im neuen `/routing`-UI (Abschnitt 4) als „Für
+  Firewall-Betrieb empfohlen" markieren, damit Nutzer es finden.
+- **DHCP nicht nur an/aus, sondern eingeschränkt**: für den Fall, dass
+  trotz eigener Firewall noch ein einzelnes Gerät direkt am OMR-Router
+  betrieben werden soll (z. B. ein IoT-Gerät), DHCP nicht komplett
+  deaktivieren, sondern auf einen reduzierten Adressbereich begrenzen können
+  — kleine Erweiterung des LAN-Konfig-Schritts.
+
+## 10. Phasenplan (Umsetzung, falls beschlossen)
+
+0. **Phase R0 — Settings-Service & Nachträgliche Änderbarkeit**: neuer
+   `settings_service.py` (verschlüsselte Override-Ablage + `.env`-Sync +
+   Cache-Invalidierung), neue Settings-Seite im Frontend (Verbindung,
+   Sicherheit, Netzwerk), Verbindungstest-Buttons. **Voraussetzung für alles
+   Weitere** — sollte vor R1 kommen, da spätere Phasen (mehrere Egress-Profile,
+   Router-UCI-Schreibzugriffe) ohnehin von einer robusten Settings-Schicht
+   profitieren.
 1. **Phase R1 — Datenmodell & Migration**: neue Schemas, JSON-Persistenz,
    automatische Migration der bestehenden `PortForward`/`ExitVpn`-Daten,
    `/routing/*`-Endpunkte parallel zu den bestehenden (noch ohne UI).
@@ -261,8 +489,16 @@ Routing-Tabellen).
 6. **Phase R6 — Sicherheits-Review & Doku**: vollständiger Threat-Review der
    neuen Angriffsfläche (insbesondere 1:1-Host-Exposure und Rate-Limit-
    Umgehung), Aktualisierung von `config-map` und `INSTALL.de.md`.
+7. **Phase R7 — Eigene Firewall, Stufe 1+2**: DHCP-Toggle-Preset, Info-Banner
+   zur VPS-Public-IP/DDNS-Erklärung, Firewall-Topology-Knoten mit Health-Check,
+   UPnP/NAT-PMP-Relay (sofern Router-seitige Durchleitung vorbereitet ist).
+8. **Phase R8 — Eigene Firewall, Stufe 3 (IP-Passthrough)**: eigenes,
+   größeres Vorhaben mit Abhängigkeit zum Router-Firmware-Repo
+   (`congp20/openmptcprouter`) und zur Hoster-IP-Vergabe; verdient einen
+   eigenen Plan/Issue, sobald R7 abgeschlossen ist und echter Bedarf
+   bestätigt wurde.
 
-## 8. Verifikation (pro Phase)
+## 11. Verifikation (pro Phase)
 
 - `pytest dashboard/backend/tests/test_routing*.py` für Renderer- und
   Konflikt-Logik (reine Übersetzungs-/Validierungslogik, gut testbar ohne
@@ -274,3 +510,11 @@ Routing-Tabellen).
 - Auf einer echten VPS-Testinstanz: `ip rule list` / `ip route show table
   <n>` / `shorewall show rules` nach Anwenden gegen die im UI angezeigte
   Vorschau abgleichen.
+- **R0 zusätzlich**: nach jeder Settings-Änderung per UI prüfen, dass *kein*
+  Container-Neustart nötig war (außer den dokumentierten Ausnahmen wie
+  `BIND_ADDR`) — z. B. `ROUTER_PASS` ändern und sofort einen
+  Verbindungstest auslösen, ohne `docker compose restart`.
+- **R7 zusätzlich**: DHCP-Toggle setzen → prüfen, dass der Router tatsächlich
+  keine Leases mehr vergibt (`ubus call dhcp ipv4leases` o. ä.); Info-Banner
+  mit der echten VPS-Public-IP gegen `curl ifconfig.me` auf dem VPS
+  abgleichen.
