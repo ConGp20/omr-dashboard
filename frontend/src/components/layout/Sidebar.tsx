@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Activity,
   Network,
@@ -57,9 +57,14 @@ function StateDot() {
 }
 
 function ThemeToggle() {
-  const [dark, setDark] = useState(
-    typeof document !== "undefined" && document.documentElement.classList.contains("dark"),
-  );
+  // Start false on both server and the client's first render so hydration
+  // matches; sync to the real (possibly inline-script-set) class after mount.
+  const [dark, setDark] = useState(false);
+
+  useEffect(() => {
+    setDark(document.documentElement.classList.contains("dark"));
+  }, []);
+
   const toggle = () => {
     const next = !dark;
     setDark(next);
