@@ -21,6 +21,10 @@ service, and aggregates everything (VPS + router) into one clean UI:
 > The underlying OMR technology is unchanged — this is purely a usability layer
 > on top of the existing APIs. LuCI remains available.
 
+> 📖 **Ausführliche deutsche Installationsanleitung:** [`INSTALL.de.md`](INSTALL.de.md)
+> — Schritt für Schritt vom Demo-Test bis zum Live-Betrieb auf dem VPS, inkl.
+> Wizard-Walkthrough, Tunnel-Zugriff und Fehlersuche.
+
 ---
 
 ## Quick start (demo, no VPS needed)
