@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import os
 import sqlite3
+import threading
 import time
 from typing import Optional
 
@@ -51,6 +52,12 @@ _PERIOD_SECONDS = {
 class MetricsStore:
     def __init__(self) -> None:
         self.settings = get_settings()
+        # The single connection is shared across the thread-pool executor, so
+        # every access is serialized with this lock. sqlite3's per-connection
+        # transaction state is not safe under concurrent writers otherwise
+        # ("cannot commit - no transaction is active" when a poller metrics
+        # write races a state-change event write).
+        self._lock = threading.Lock()
         os.makedirs(self.settings.data_dir, exist_ok=True)
         self._conn = sqlite3.connect(self.settings.db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
@@ -67,7 +74,7 @@ class MetricsStore:
         await asyncio.to_thread(self._insert_metrics, rows)
 
     def _insert_metrics(self, rows: list[tuple]) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.executemany(
                 "INSERT INTO link_metrics (ts, link_id, rx_bps, tx_bps, latency_ms, packet_loss_pct)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
@@ -78,7 +85,7 @@ class MetricsStore:
         await asyncio.to_thread(self._insert_event, event)
 
     def _insert_event(self, event: Event) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute(
                 "INSERT INTO events (ts, type, detail, severity) VALUES (?, ?, ?, ?)",
                 (event.ts, event.type, event.detail, event.severity),
@@ -86,7 +93,7 @@ class MetricsStore:
 
     async def add_speedtest(self, test_type: str, link_id: Optional[str], rx: float, tx: float, server: str) -> None:
         def _ins() -> None:
-            with self._conn:
+            with self._lock, self._conn:
                 self._conn.execute(
                     "INSERT INTO speedtest_results (ts, test_type, link_id, rx_mbps, tx_mbps, server)"
                     " VALUES (?, ?, ?, ?, ?, ?)",
@@ -110,34 +117,37 @@ class MetricsStore:
         ]
 
     def _select_metrics(self, since: int, bucket: int) -> list[tuple]:
-        cur = self._conn.execute(
-            "SELECT (ts/?)*? AS bucket, link_id,"
-            "       AVG(rx_bps), AVG(tx_bps), AVG(latency_ms), AVG(packet_loss_pct)"
-            "  FROM link_metrics WHERE ts >= ?"
-            " GROUP BY bucket, link_id ORDER BY bucket ASC",
-            (bucket, bucket, since),
-        )
-        return cur.fetchall()
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT (ts/?)*? AS bucket, link_id,"
+                "       AVG(rx_bps), AVG(tx_bps), AVG(latency_ms), AVG(packet_loss_pct)"
+                "  FROM link_metrics WHERE ts >= ?"
+                " GROUP BY bucket, link_id ORDER BY bucket ASC",
+                (bucket, bucket, since),
+            )
+            return cur.fetchall()
 
     async def events(self, limit: int = 50) -> list[Event]:
         rows = await asyncio.to_thread(self._select_events, limit)
         return [Event(ts=r[0], type=r[1], detail=r[2] or "", severity=r[3] or "info") for r in rows]
 
     def _select_events(self, limit: int) -> list[tuple]:
-        cur = self._conn.execute(
-            "SELECT ts, type, detail, severity FROM events ORDER BY ts DESC LIMIT ?",
-            (limit,),
-        )
-        return cur.fetchall()
-
-    async def speedtests(self, limit: int = 20) -> list[dict]:
-        def _sel() -> list[tuple]:
+        with self._lock:
             cur = self._conn.execute(
-                "SELECT ts, test_type, link_id, rx_mbps, tx_mbps, server"
-                " FROM speedtest_results ORDER BY ts DESC LIMIT ?",
+                "SELECT ts, type, detail, severity FROM events ORDER BY ts DESC LIMIT ?",
                 (limit,),
             )
             return cur.fetchall()
+
+    async def speedtests(self, limit: int = 20) -> list[dict]:
+        def _sel() -> list[tuple]:
+            with self._lock:
+                cur = self._conn.execute(
+                    "SELECT ts, test_type, link_id, rx_mbps, tx_mbps, server"
+                    " FROM speedtest_results ORDER BY ts DESC LIMIT ?",
+                    (limit,),
+                )
+                return cur.fetchall()
         rows = await asyncio.to_thread(_sel)
         return [
             {"ts": r[0], "test_type": r[1], "link_id": r[2], "rx_mbps": r[3], "tx_mbps": r[4], "server": r[5]}
@@ -150,7 +160,7 @@ class MetricsStore:
         await asyncio.to_thread(self._prune, cutoff)
 
     def _prune(self, cutoff: int) -> None:
-        with self._conn:
+        with self._lock, self._conn:
             self._conn.execute("DELETE FROM link_metrics WHERE ts < ?", (cutoff,))
             self._conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
 

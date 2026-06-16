@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 
 import httpx
@@ -25,6 +26,8 @@ from services.omr_proxy import PROTOCOL_META, OmrProxy
 from services.router_proxy import RouterProxy
 
 router = APIRouter(prefix="/wizard", tags=["wizard"])
+
+_log = logging.getLogger("omr_dashboard.wizard")
 
 
 @router.post("/connect", response_model=WizardConnectResult)
@@ -53,8 +56,10 @@ async def connect(payload: WizardConnect, _: str = Depends(require_user)) -> Wiz
         return WizardConnectResult(
             success=False,
             error="VPS nicht erreichbar — Port 65500 durch Firewall blockiert oder falsche IP?")
-    except Exception as exc:  # noqa: BLE001
-        return WizardConnectResult(success=False, error=f"Verbindung fehlgeschlagen: {exc}")
+    except Exception:  # noqa: BLE001
+        _log.warning("Wizard-Connect zu %s fehlgeschlagen", payload.vps_ip, exc_info=True)
+        return WizardConnectResult(
+            success=False, error="Verbindung fehlgeschlagen — Details siehe Server-Log")
 
 
 @router.post("/detect-wans", response_model=WizardDetectResult)

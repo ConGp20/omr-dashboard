@@ -21,6 +21,30 @@ def test_portforward_crud(client):
     assert client.delete(f"/vps/portforward/{pid}").json()["success"] is True
 
 
+def test_portforward_rejects_injection_dest_ip(client):
+    # A dest_ip carrying extra tokens must be rejected, never written into the rule.
+    r = client.post("/vps/portforward", json={
+        "description": "x", "proto": "tcp", "src_port": 8080,
+        "dest_ip": "192.168.100.2 -j ACCEPT", "dest_port": 80})
+    assert r.status_code == 422
+
+
+def test_portforward_rejects_out_of_range_port(client):
+    r = client.post("/vps/portforward", json={
+        "description": "x", "proto": "tcp", "src_port": 70000,
+        "dest_ip": "192.168.100.2", "dest_port": 80})
+    assert r.status_code == 422
+
+
+def test_portforward_description_is_single_line(client):
+    # Newlines in the description must be collapsed so they can't break the rule line.
+    pf = client.post("/vps/portforward", json={
+        "description": "evil\nDNAT net loc:1.2.3.4", "proto": "tcp",
+        "src_port": 8099, "dest_ip": "192.168.100.2", "dest_port": 80}).json()
+    assert "\n" not in pf["description"]
+    client.delete(f"/vps/portforward/{pf['id']}")
+
+
 def test_portforward_target_picker(client):
     hosts = client.get("/vps/hosts").json()
     ips = {h["ip"] for h in hosts}

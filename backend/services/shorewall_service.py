@@ -11,6 +11,7 @@ In demo mode rules are kept in memory only.
 """
 from __future__ import annotations
 
+import logging
 import os
 import subprocess
 import uuid
@@ -21,6 +22,8 @@ from schemas import FirewallRule, PortForward
 
 _BEGIN = "# >>> OMR-DASHBOARD MANAGED (do not edit by hand) >>>"
 _END = "# <<< OMR-DASHBOARD MANAGED <<<"
+
+_log = logging.getLogger("omr_dashboard.shorewall")
 
 # In-memory store for demo mode.
 _demo_forwards: list[PortForward] = [
@@ -113,6 +116,10 @@ class ShorewallService:
             pf = self._parse_dnat_line(line)
             if pf:
                 forwards.append(pf)
+            else:
+                _log.warning(
+                    "Überspringe unlesbare DNAT-Zeile im verwalteten Block: %r", line
+                )
         return forwards
 
     @staticmethod

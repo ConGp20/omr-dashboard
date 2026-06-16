@@ -76,12 +76,21 @@ def create_backup(
     return gzip.compress(json.dumps(payload).encode())
 
 
+def _load_payload(blob: bytes) -> dict[str, Any]:
+    """Decompress + parse a backup blob, mapping any malformed input to a clean
+    ValueError so callers return 400 (bad upload), never an unhandled 500."""
+    try:
+        payload = json.loads(gzip.decompress(blob))
+    except Exception as exc:  # noqa: BLE001 — any corrupt/non-gzip/non-json input
+        raise ValueError("Keine gültige OMR-Backup-Datei") from exc
+    if not isinstance(payload, dict) or payload.get("magic") != _MAGIC:
+        raise ValueError("Keine gültige OMR-Backup-Datei")
+    return payload
+
+
 def read_backup(*, password: str, blob: bytes) -> dict[str, Any]:
     """Decode and decrypt a backup blob into its components."""
-    raw = gzip.decompress(blob)
-    payload = json.loads(raw)
-    if payload.get("magic") != _MAGIC:
-        raise ValueError("Keine gültige OMR-Backup-Datei")
+    payload = _load_payload(blob)
     creds = payload.get("credentials", {})
     secrets: dict[str, Any] = {}
     if creds.get("encrypted"):
@@ -99,9 +108,7 @@ def read_backup(*, password: str, blob: bytes) -> dict[str, Any]:
 
 def preview_backup(*, blob: bytes) -> dict[str, Any]:
     """Return non-secret metadata without needing the password."""
-    payload = json.loads(gzip.decompress(blob))
-    if payload.get("magic") != _MAGIC:
-        raise ValueError("Keine gültige OMR-Backup-Datei")
+    payload = _load_payload(blob)
     return {
         "created": payload.get("created"),
         "version": payload.get("version"),

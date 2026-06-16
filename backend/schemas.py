@@ -5,10 +5,11 @@ TypeScript types in ``frontend/src/lib/types.ts`` mirror them.
 """
 from __future__ import annotations
 
+import ipaddress
 from enum import Enum
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # --------------------------------------------------------------------------- #
@@ -155,10 +156,29 @@ class PortForward(BaseModel):
     id: Optional[str] = None
     description: str = ""
     proto: Literal["tcp", "udp", "tcp/udp"] = "tcp"
-    src_port: int
+    src_port: int = Field(ge=1, le=65535)
     dest_ip: str
-    dest_port: int
+    dest_port: int = Field(ge=1, le=65535)
     enabled: bool = True
+
+    @field_validator("dest_ip")
+    @classmethod
+    def _validate_dest_ip(cls, v: str) -> str:
+        """Reject anything that is not a plain IP — the value is written verbatim
+        into the Shorewall DNAT rule, so it must never carry extra tokens."""
+        v = v.strip()
+        try:
+            ipaddress.ip_address(v)
+        except ValueError as exc:
+            raise ValueError("dest_ip muss eine gültige IP-Adresse sein") from exc
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def _clean_description(cls, v: str) -> str:
+        """Collapse all whitespace so the description can't break out of the
+        single-line shorewall rule/comment it is rendered into."""
+        return " ".join(v.split())
 
 
 class ExitVpn(BaseModel):
