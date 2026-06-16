@@ -1,7 +1,9 @@
 "use client";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { LinkIcon } from "@/components/LinkIcon";
+import { Sparkline } from "@/components/dashboard/Sparkline";
 import { Badge } from "@/components/ui/primitives";
+import { useDashboardStore } from "@/lib/store";
 import { formatBps, linkTypeLabel, cn } from "@/lib/utils";
 import type { LinkStatus } from "@/lib/types";
 
@@ -17,10 +19,13 @@ const CAP: Record<string, number> = {
   fiber: 100e6, dsl: 50e6, lte: 50e6, "5g": 100e6, ethernet: 100e6, satellite: 50e6, other: 50e6,
 };
 
+const TONE_TEXT = { good: "text-good", warn: "text-warn", bad: "text-bad", neutral: "text-muted" } as const;
+
 export function LinkCard({ link }: { link: LinkStatus }) {
   const meta = STATE_META[link.state];
   const cap = CAP[link.type] ?? 50e6;
   const fill = Math.min(100, (link.rx_bps / cap) * 100);
+  const history = useDashboardStore((s) => s.linkHistory[link.id]) ?? [];
 
   return (
     <div className="rounded-xl border border-border bg-surface p-4">
@@ -53,6 +58,9 @@ export function LinkCard({ link }: { link: LinkStatus }) {
           <ArrowDown size={13} className="text-muted" />
           <span className="tabular font-medium">{formatBps(link.rx_bps)}</span>
         </span>
+        {history.length > 1 && (
+          <Sparkline values={history} className={cn("h-5 w-20", TONE_TEXT[meta.tone])} />
+        )}
         <span className="flex items-center gap-1 text-fg">
           <ArrowUp size={13} className="text-muted" />
           <span className="tabular font-medium">{formatBps(link.tx_bps)}</span>

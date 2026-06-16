@@ -100,7 +100,7 @@ function PortForwardSection() {
             <Badge tone="neutral">{pf.proto}</Badge>
             <span className="text-muted">→</span>
             <span className="tabular text-fg">{pf.dest_ip}:{pf.dest_port}</span>
-            <span className="flex-1 truncate text-xs text-muted">{pf.description}</span>
+            <span className="min-w-0 flex-1 truncate text-xs text-muted">{pf.description}</span>
             <button onClick={() => remove(pf.id!)} className="text-muted hover:text-bad">
               <Trash2 size={15} />
             </button>

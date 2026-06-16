@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/primitives";
 import { useWizard } from "@/lib/wizardStore";
 import { api } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { requestTour } from "@/components/onboarding/OnboardingTour";
 
 interface ApplyStep {
   step: string;
@@ -79,9 +80,20 @@ export function StepApply() {
             </div>
           </div>
         )}
-        <Button onClick={() => router.push("/dashboard")} className="mx-auto">
-          <Rocket size={16} /> Zum Dashboard
-        </Button>
+        <div className="flex justify-center gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              requestTour();
+              router.push("/dashboard");
+            }}
+          >
+            Mit Tour starten
+          </Button>
+          <Button onClick={() => router.push("/dashboard")}>
+            <Rocket size={16} /> Zum Dashboard
+          </Button>
+        </div>
       </div>
     );
   }

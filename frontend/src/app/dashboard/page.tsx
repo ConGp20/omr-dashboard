@@ -30,7 +30,7 @@ export default function DashboardPage() {
       )}
 
       {/* Link cards */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div data-tour-step="link-cards" className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
         {links.map((l) => (
           <LinkCard key={l.id} link={l} />
         ))}

@@ -34,6 +34,7 @@ export function StatusBanner() {
 
   return (
     <div
+      data-tour-step="status-banner"
       className={cn(
         "flex flex-col gap-4 rounded-2xl border bg-gradient-to-br p-5 sm:flex-row sm:items-center sm:justify-between",
         toneClasses,

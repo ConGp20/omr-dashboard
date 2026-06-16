@@ -26,6 +26,21 @@ const COLUMN_X: Record<string, number> = {
 
 const EDGE_COLOR = "rgb(100 116 139)";
 
+// Reference capacity (bps) an edge's line thickness scales against — same
+// ballpark as LinkCard's CAP table, just one shared number since edges mix
+// link/tunnel/portforward traffic.
+const MAX_BPS_REF = 100e6;
+
+function edgeWidth(bps: number): number {
+  if (!bps) return 1.5;
+  const ratio = Math.min(1, bps / MAX_BPS_REF);
+  return 1.5 + ratio * 4.5; // idle 1.5px up to 6px at/above reference capacity
+}
+
+function edgeColor(bps: number): string {
+  return bps > 0 ? "rgb(var(--primary))" : EDGE_COLOR;
+}
+
 function layout(topo: Topology): { nodes: Node[]; edges: Edge[] } {
   const byType: Record<string, typeof topo.nodes> = {};
   for (const n of topo.nodes) (byType[n.type] ??= []).push(n);
@@ -54,10 +69,11 @@ function layout(topo: Topology): { nodes: Node[]; edges: Edge[] } {
     target: e.target,
     animated: e.animated,
     label: e.label ?? undefined,
-    style: { stroke: EDGE_COLOR, strokeWidth: 2 },
-    labelStyle: { fill: "rgb(148 158 176)", fontSize: 11 },
+    // Thicker, brighter line the more traffic an edge is currently carrying.
+    style: { stroke: edgeColor(e.bps), strokeWidth: edgeWidth(e.bps) },
+    labelStyle: { fill: "rgb(var(--muted))", fontSize: 11 },
     labelBgStyle: { fill: "rgb(var(--surface))" },
-    markerEnd: { type: MarkerType.ArrowClosed, color: EDGE_COLOR },
+    markerEnd: { type: MarkerType.ArrowClosed, color: edgeColor(e.bps) },
   }));
 
   return { nodes, edges };
@@ -93,7 +109,7 @@ export function TopologyDiagram() {
   };
 
   return (
-    <div className="h-[360px] w-full overflow-hidden rounded-xl border border-border bg-surface">
+    <div data-tour-step="topology" className="h-[360px] w-full overflow-hidden rounded-xl border border-border bg-surface">
       <ReactFlow
         nodes={nodes}
         edges={edges}

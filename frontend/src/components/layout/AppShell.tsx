@@ -1,6 +1,8 @@
 "use client";
 import { usePathname } from "next/navigation";
 import { Sidebar } from "./Sidebar";
+import { CommandPalette } from "@/components/CommandPalette";
+import { OnboardingTour } from "@/components/onboarding/OnboardingTour";
 import { useStatusStream } from "@/hooks/useStatusStream";
 
 /**
@@ -14,15 +16,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const fullBleed = pathname === "/wizard" || pathname === "/login";
 
   if (fullBleed) {
-    return <main className="min-h-screen">{children}</main>;
+    return (
+      <main className="min-h-screen">
+        {children}
+        <CommandPalette />
+      </main>
+    );
   }
 
   return (
     <div className="flex min-h-screen">
       <Sidebar />
-      <main className="flex-1 overflow-x-hidden md:ml-60">
+      {/* pt accounts for the fixed mobile top bar (h-[52px]); md+ has no top bar. */}
+      <main className="flex-1 overflow-x-hidden pt-[52px] md:ml-60 md:pt-0">
         <div className="mx-auto max-w-7xl p-4 md:p-6">{children}</div>
       </main>
+      <CommandPalette />
+      <OnboardingTour />
     </div>
   );
 }

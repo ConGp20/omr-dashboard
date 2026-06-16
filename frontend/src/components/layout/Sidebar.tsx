@@ -1,40 +1,13 @@
 "use client";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import {
-  Activity,
-  Network,
-  Server,
-  Sliders,
-  Globe,
-  Shield,
-  LineChart,
-  Stethoscope,
-  Map,
-  Settings,
-  Moon,
-  Sun,
-  Menu,
-  X,
-  Cable,
-} from "lucide-react";
+import { Moon, Sun, Menu, X, Network, Compass, Search } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useDashboardStore } from "@/lib/store";
-
-const NAV = [
-  { href: "/dashboard", label: "Übersicht", icon: Activity },
-  { href: "/links", label: "Verbindungen", icon: Cable },
-  { href: "/protocols", label: "Protokoll", icon: Network },
-  { href: "/vps", label: "VPS-Endpunkt", icon: Server },
-  { href: "/firewall", label: "Firewall & Ports", icon: Shield },
-  { href: "/qos", label: "QoS & Traffic", icon: Sliders },
-  { href: "/dns", label: "DNS", icon: Globe },
-  { href: "/monitoring", label: "Verlauf", icon: LineChart },
-  { href: "/diagnostics", label: "Diagnose", icon: Stethoscope },
-  { href: "/config-map", label: "Konfig-Karte", icon: Map },
-  { href: "/system", label: "System", icon: Settings },
-];
+import { NAV } from "@/lib/nav";
+import { requestTour } from "@/components/onboarding/OnboardingTour";
+import { openCommandPalette } from "@/components/CommandPalette";
 
 function StateDot() {
   const status = useDashboardStore((s) => s.status);
@@ -86,6 +59,22 @@ function ThemeToggle() {
   );
 }
 
+function RestartTourButton() {
+  const router = useRouter();
+  const start = () => {
+    requestTour();
+    router.push("/dashboard");
+  };
+  return (
+    <button
+      onClick={start}
+      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted hover:bg-surface-2"
+    >
+      <Compass size={16} /> Tour starten
+    </button>
+  );
+}
+
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
@@ -112,6 +101,13 @@ export function Sidebar() {
           <Network className="text-primary" /> OMR Dashboard
         </div>
         <StateDot />
+        <button
+          onClick={openCommandPalette}
+          className="mx-2 mb-1 flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-xs text-muted hover:bg-surface-2"
+        >
+          <Search size={14} /> Suche
+          <kbd className="ml-auto rounded border border-border bg-surface-2 px-1.5 py-0.5 font-mono text-[10px]">⌘K</kbd>
+        </button>
         <nav className="mt-2 flex-1 space-y-0.5 overflow-y-auto px-2">
           {NAV.map((item) => {
             const active = pathname === item.href;
@@ -121,6 +117,7 @@ export function Sidebar() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setOpen(false)}
+                data-tour-step={item.tourId}
                 className={cn(
                   "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition",
                   active
@@ -135,6 +132,7 @@ export function Sidebar() {
           })}
         </nav>
         <div className="border-t border-border p-2">
+          <RestartTourButton />
           <ThemeToggle />
         </div>
       </aside>

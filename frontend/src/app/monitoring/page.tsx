@@ -67,16 +67,17 @@ export default function MonitoringPage() {
           ) : (
             <ResponsiveContainer width="100%" height={300}>
               <AreaChart data={rows}>
-                <CartesianGrid strokeDasharray="3 3" stroke="rgb(100 116 139 / 0.15)" />
-                <XAxis dataKey="time" tick={{ fontSize: 11, fill: "rgb(148 158 176)" }} />
-                <YAxis tick={{ fontSize: 11, fill: "rgb(148 158 176)" }} />
+                <CartesianGrid strokeDasharray="3 3" stroke="rgb(var(--border))" />
+                <XAxis dataKey="time" tick={{ fontSize: 11, fill: "rgb(var(--muted))" }} />
+                <YAxis tick={{ fontSize: 11, fill: "rgb(var(--muted))" }} />
                 <Tooltip
                   contentStyle={{
-                    background: "rgb(19 25 38)", border: "1px solid rgb(39 48 66)",
-                    borderRadius: 8, fontSize: 12,
+                    background: "rgb(var(--surface))", border: "1px solid rgb(var(--border))",
+                    borderRadius: 8, fontSize: 12, color: "rgb(var(--fg))",
                   }}
+                  labelStyle={{ color: "rgb(var(--fg))" }}
                 />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
+                <Legend wrapperStyle={{ fontSize: 12, color: "rgb(var(--fg))" }} />
                 {links.map((id, i) => (
                   <Area
                     key={id}
