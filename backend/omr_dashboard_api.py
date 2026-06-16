@@ -25,6 +25,7 @@ from routers import (
     metrics,
     protocols,
     qos,
+    settings as settings_router,
     status,
     system,
     vps,
@@ -88,6 +89,7 @@ def create_app() -> FastAPI:
     app.include_router(system.router)
     app.include_router(configmap.router)
     app.include_router(wizard.router)
+    app.include_router(settings_router.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict:

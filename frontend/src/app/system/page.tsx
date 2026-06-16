@@ -1,10 +1,11 @@
 "use client";
 import { useRef, useState } from "react";
-import { ArrowUpCircle, CheckCircle2, Download, Upload, Save } from "lucide-react";
+import { ArrowUpCircle, CheckCircle2, Download, Upload, Save, KeyRound, Wifi } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
-import { Card, CardHeader, CardTitle, CardContent, Button, Badge } from "@/components/ui/primitives";
+import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Label } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
-import type { ComponentVersion } from "@/lib/types";
+import { api } from "@/lib/api";
+import type { ComponentVersion, ConnectionSettings, ConnectionTestResult, SecuritySettings } from "@/lib/types";
 
 function Versions() {
   const { data } = useApi<{ components: ComponentVersion[] }>("/system/versions");
@@ -118,11 +119,140 @@ function BackupRestore() {
   );
 }
 
+function ConnectionSettingsSection() {
+  const { data, refetch } = useApi<ConnectionSettings>("/settings/connection");
+  const [form, setForm] = useState<{ router_ip: string; router_user: string; router_pass: string; omr_admin_key: string } | null>(null);
+  const [test, setTest] = useState<ConnectionTestResult | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!data) return null;
+  const vals = form ?? { router_ip: data.router_ip, router_user: data.router_user, router_pass: "", omr_admin_key: "" };
+
+  const save = async () => {
+    setBusy(true);
+    try {
+      const payload: Record<string, string> = { router_ip: vals.router_ip, router_user: vals.router_user };
+      if (vals.router_pass) payload.router_pass = vals.router_pass;
+      if (vals.omr_admin_key) payload.omr_admin_key = vals.omr_admin_key;
+      await api.put("/settings/connection", payload);
+      setForm(null);
+      refetch();
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const runTest = async () => {
+    setBusy(true);
+    try {
+      setTest(await api.post<ConnectionTestResult>("/settings/connection/test"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="flex items-center gap-2"><Wifi size={16} /> Verbindung (Router & VPS)</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted">
+          Diese Zugangsdaten hat der Setup-Assistent einmal gesetzt — hier lassen sie sich
+          jederzeit ändern, ohne den Container neu zu starten.
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div>
+            <Label>Router-IP</Label>
+            <Input value={vals.router_ip} onChange={(e) => setForm({ ...vals, router_ip: e.target.value })} />
+          </div>
+          <div>
+            <Label>Router-Benutzer</Label>
+            <Input value={vals.router_user} onChange={(e) => setForm({ ...vals, router_user: e.target.value })} />
+          </div>
+          <div>
+            <Label className="flex items-center gap-1.5">Router-Passwort {data.router_pass_set && <Badge tone="good">gesetzt</Badge>}</Label>
+            <Input type="password" placeholder="•••• (leer = unverändert)" value={vals.router_pass} onChange={(e) => setForm({ ...vals, router_pass: e.target.value })} />
+          </div>
+          <div>
+            <Label className="flex items-center gap-1.5">OMR-Admin-Key {data.omr_admin_key_set && <Badge tone="good">gesetzt</Badge>}</Label>
+            <Input type="password" placeholder="•••• (leer = unverändert)" value={vals.omr_admin_key} onChange={(e) => setForm({ ...vals, omr_admin_key: e.target.value })} />
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button size="sm" onClick={save} disabled={!form || busy}>Speichern</Button>
+          <Button size="sm" variant="outline" onClick={runTest} disabled={busy}>Verbindung testen</Button>
+          {test && (
+            <span className="text-xs text-muted">
+              Router: {test.router_reachable ? "✓" : "✗"} {test.router_detail} · OMR-Admin: {test.omr_admin_reachable ? "✓" : "✗"} {test.omr_admin_detail}
+            </span>
+          )}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+function SecuritySettingsSection() {
+  const { data, refetch } = useApi<SecuritySettings>("/settings/security");
+  const [form, setForm] = useState<{ dashboard_user: string; dashboard_pass: string; jwt_secret: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+
+  if (!data) return null;
+  const vals = form ?? { dashboard_user: data.dashboard_user, dashboard_pass: "", jwt_secret: "" };
+
+  const save = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const payload: Record<string, string> = { dashboard_user: vals.dashboard_user };
+      if (vals.dashboard_pass) payload.dashboard_pass = vals.dashboard_pass;
+      if (vals.jwt_secret) payload.jwt_secret = vals.jwt_secret;
+      await api.put("/settings/security", payload);
+      const loggedOut = !!vals.jwt_secret;
+      setForm(null);
+      refetch();
+      setMsg(loggedOut ? "Gespeichert — alle Sitzungen wurden abgemeldet (JWT-Secret geändert)." : "Gespeichert.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Card>
+      <CardHeader><CardTitle className="flex items-center gap-2"><KeyRound size={16} /> Sicherheit</CardTitle></CardHeader>
+      <CardContent className="space-y-3">
+        <p className="text-xs text-muted">
+          Dashboard-Login und Session-Signatur. Das Ändern des JWT-Secrets meldet
+          alle aktiven Sitzungen sofort ab.
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+          <div>
+            <Label>Dashboard-Benutzer</Label>
+            <Input value={vals.dashboard_user} onChange={(e) => setForm({ ...vals, dashboard_user: e.target.value })} />
+          </div>
+          <div>
+            <Label className="flex items-center gap-1.5">Dashboard-Passwort {data.dashboard_pass_set && <Badge tone="good">gesetzt</Badge>}</Label>
+            <Input type="password" placeholder="•••• (leer = unverändert)" value={vals.dashboard_pass} onChange={(e) => setForm({ ...vals, dashboard_pass: e.target.value })} />
+          </div>
+          <div className="sm:col-span-2">
+            <Label className="flex items-center gap-1.5">JWT-Secret {data.jwt_secret_set && <Badge tone="good">gesetzt</Badge>}</Label>
+            <Input type="password" placeholder="•••• (leer = unverändert)" value={vals.jwt_secret} onChange={(e) => setForm({ ...vals, jwt_secret: e.target.value })} />
+          </div>
+        </div>
+        <Button size="sm" onClick={save} disabled={!form || busy}>Speichern</Button>
+        {msg && <p className="text-sm text-fg">{msg}</p>}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SystemPage() {
   return (
     <div>
-      <PageHeader title="System" description="Versionen, Updates und Konfigurations-Backups." />
+      <PageHeader title="System" description="Versionen, Updates, Zugangsdaten und Konfigurations-Backups." />
       <div className="space-y-4">
+        <ConnectionSettingsSection />
+        <SecuritySettingsSection />
         <Versions />
         <BackupRestore />
       </div>

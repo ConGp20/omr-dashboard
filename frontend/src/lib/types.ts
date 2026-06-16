@@ -86,14 +86,25 @@ export interface ProtocolInfo {
   recommended: boolean;
 }
 
+export interface IngressTarget {
+  dest_ip: string;
+  dest_port: number;
+  weight: number;
+}
+
 export interface PortForward {
   id?: string | null;
   description: string;
   proto: "tcp" | "udp" | "tcp/udp";
   src_port: number;
+  src_port_end?: number | null;
   dest_ip: string;
   dest_port: number;
   enabled: boolean;
+  extra_targets: IngressTarget[];
+  allow_src_cidrs: string[];
+  deny_src_cidrs: string[];
+  rate_limit_per_min?: number | null;
 }
 
 export interface ExitVpn {
@@ -174,6 +185,28 @@ export interface WizardWan {
   ip?: string | null;
   up: boolean;
   enabled: boolean;
+}
+
+export interface ConnectionSettings {
+  router_ip: string;
+  router_user: string;
+  router_pass_set: boolean;
+  omr_admin_key_set: boolean;
+  overridden: string[];
+}
+
+export interface ConnectionTestResult {
+  router_reachable: boolean;
+  router_detail: string;
+  omr_admin_reachable: boolean;
+  omr_admin_detail: string;
+}
+
+export interface SecuritySettings {
+  dashboard_user: string;
+  dashboard_pass_set: boolean;
+  jwt_secret_set: boolean;
+  overridden: string[];
 }
 
 export interface ConfigMapItem {

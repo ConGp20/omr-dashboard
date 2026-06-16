@@ -101,6 +101,11 @@ class OmrProxy:
             return None
 
     # --- high level --------------------------------------------------------
+    async def ping(self) -> bool:
+        if self.settings.demo:
+            return True
+        return await self._get("/") is not None
+
     def current_vpn(self) -> str:
         """Read the active protocol from the VPS state file."""
         if self.settings.demo:

@@ -50,4 +50,19 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    # Apply persisted overrides (router/auth credentials edited later from the
+    # dashboard, see services/settings_service.py) on top of the env defaults.
+    from services.settings_service import load_overrides
+
+    overrides = load_overrides(settings.data_dir)
+    if overrides:
+        settings = settings.model_copy(update=overrides)
+    return settings
+
+
+def clear_settings_cache() -> None:
+    """Call after persisting new overrides so the next get_settings() picks
+    them up. Every consumer (auth, RouterProxy, OmrProxy, ...) reads settings
+    fresh via get_settings() on each use, so no further plumbing is needed."""
+    get_settings.cache_clear()

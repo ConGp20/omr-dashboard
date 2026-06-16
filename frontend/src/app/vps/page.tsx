@@ -11,22 +11,42 @@ import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
 import type { PortForward, ExitVpn, NatStatus, TopologyHost } from "@/lib/types";
 
+const EMPTY_FORWARD: PortForward = {
+  description: "", proto: "tcp", src_port: 0, dest_ip: "", dest_port: 0, enabled: true,
+  extra_targets: [], allow_src_cidrs: [], deny_src_cidrs: [],
+};
+
+/** Parses a comma-separated list (CIDRs, etc.), trimming and dropping empties. */
+function parseList(s: string): string[] {
+  return s.split(",").map((x) => x.trim()).filter(Boolean);
+}
+
 function PortForwardSection() {
   const { data: forwards, refetch } = useApi<PortForward[]>("/vps/portforward");
   const { data: hosts } = useApi<TopologyHost[]>("/vps/hosts");
   const [adding, setAdding] = useState(false);
-  const [form, setForm] = useState<PortForward>({
-    description: "", proto: "tcp", src_port: 0, dest_ip: "", dest_port: 0, enabled: true,
-  });
+  const [advanced, setAdvanced] = useState(false);
+  const [form, setForm] = useState<PortForward>(EMPTY_FORWARD);
 
   const FIREWALL_PRESET = { label: "Firewall/VPN Durchleitung", port: 1194, proto: "udp" as const };
 
   const add = async () => {
     await api.post("/vps/portforward", form);
     setAdding(false);
-    setForm({ description: "", proto: "tcp", src_port: 0, dest_ip: "", dest_port: 0, enabled: true });
+    setAdvanced(false);
+    setForm(EMPTY_FORWARD);
     refetch();
   };
+
+  const addExtraTarget = () =>
+    setForm((f) => ({ ...f, extra_targets: [...f.extra_targets, { dest_ip: "", dest_port: f.dest_port || 0, weight: 1 }] }));
+  const updateExtraTarget = (i: number, patch: Partial<PortForward["extra_targets"][number]>) =>
+    setForm((f) => ({
+      ...f,
+      extra_targets: f.extra_targets.map((t, idx) => (idx === i ? { ...t, ...patch } : t)),
+    }));
+  const removeExtraTarget = (i: number) =>
+    setForm((f) => ({ ...f, extra_targets: f.extra_targets.filter((_, idx) => idx !== i) }));
   const toggle = async (pf: PortForward) => {
     await api.put(`/vps/portforward/${pf.id}`, { ...pf, enabled: !pf.enabled });
     refetch();
@@ -89,6 +109,93 @@ function PortForwardSection() {
               </div>
             </div>
             <Input placeholder="Beschreibung" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} />
+
+            <button
+              type="button"
+              className="text-xs text-primary hover:underline"
+              onClick={() => setAdvanced((v) => !v)}
+            >
+              {advanced ? "▾" : "▸"} Erweitert (Portbereich, Mehrfachziele, Quellfilter, Rate-Limit)
+            </button>
+            {advanced && (
+              <div className="space-y-3 rounded-lg border border-border bg-surface p-3">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+                  <div>
+                    <Label>Bis Port (Bereich, optional)</Label>
+                    <Input
+                      type="number"
+                      placeholder={`= ${form.src_port || "Extern Port"}`}
+                      value={form.src_port_end ?? ""}
+                      onChange={(e) => setForm({ ...form, src_port_end: e.target.value ? +e.target.value : null })}
+                    />
+                  </div>
+                  <div>
+                    <Label>Rate-Limit (Verbindungen/Min)</Label>
+                    <Input
+                      type="number"
+                      placeholder="unbegrenzt"
+                      value={form.rate_limit_per_min ?? ""}
+                      onChange={(e) => setForm({ ...form, rate_limit_per_min: e.target.value ? +e.target.value : null })}
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <Label>Quell-Netze erlauben (CIDR, kommagetrennt — leer = alle)</Label>
+                  <Input
+                    placeholder="203.0.113.0/24, 198.51.100.5/32"
+                    value={form.allow_src_cidrs.join(", ")}
+                    onChange={(e) => setForm({ ...form, allow_src_cidrs: parseList(e.target.value) })}
+                  />
+                </div>
+                <div>
+                  <Label>Quell-Netze blocken (CIDR, kommagetrennt)</Label>
+                  <Input
+                    placeholder="203.0.113.99/32"
+                    value={form.deny_src_cidrs.join(", ")}
+                    onChange={(e) => setForm({ ...form, deny_src_cidrs: parseList(e.target.value) })}
+                  />
+                </div>
+
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Weitere Ziele (gewichtete Lastverteilung)</Label>
+                    <Button size="sm" variant="outline" onClick={addExtraTarget}><Plus size={12} /> Ziel</Button>
+                  </div>
+                  {form.extra_targets.map((t, i) => (
+                    <div key={i} className="flex items-center gap-2">
+                      <Select
+                        className="flex-1"
+                        value={t.dest_ip}
+                        onChange={(e) => updateExtraTarget(i, { dest_ip: e.target.value })}
+                      >
+                        <option value="">— Ziel wählen —</option>
+                        {(hosts ?? []).map((h) => (
+                          <option key={h.ip} value={h.ip}>{h.ip} {h.label ? `(${h.label})` : ""}</option>
+                        ))}
+                      </Select>
+                      <Input
+                        type="number" className="w-24" placeholder="Port"
+                        value={t.dest_port || ""}
+                        onChange={(e) => updateExtraTarget(i, { dest_port: +e.target.value })}
+                      />
+                      <Input
+                        type="number" className="w-20" placeholder="Gewicht" min={1} max={10}
+                        value={t.weight}
+                        onChange={(e) => updateExtraTarget(i, { weight: +e.target.value })}
+                      />
+                      <button onClick={() => removeExtraTarget(i)} className="text-muted hover:text-bad">
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  {form.extra_targets.length === 0 && (
+                    <p className="text-xs text-muted">Ohne weitere Ziele wird nur an die Ziel-IP oben weitergeleitet.</p>
+                  )}
+                </div>
+              </div>
+            )}
+
             <Button size="sm" onClick={add} disabled={!form.src_port || !form.dest_ip}>Hinzufügen</Button>
           </div>
         )}
@@ -96,11 +203,19 @@ function PortForwardSection() {
         {(forwards ?? []).map((pf) => (
           <div key={pf.id} className="flex items-center gap-3 rounded-lg border border-border p-2.5 text-sm">
             <Toggle checked={pf.enabled} onChange={() => toggle(pf)} />
-            <span className="tabular font-medium text-fg">:{pf.src_port}</span>
+            <span className="tabular font-medium text-fg">
+              :{pf.src_port}{pf.src_port_end ? `-${pf.src_port_end}` : ""}
+            </span>
             <Badge tone="neutral">{pf.proto}</Badge>
             <span className="text-muted">→</span>
-            <span className="tabular text-fg">{pf.dest_ip}:{pf.dest_port}</span>
+            <span className="tabular text-fg">
+              {pf.dest_ip}:{pf.dest_port}
+              {pf.extra_targets.length > 0 && ` +${pf.extra_targets.length}`}
+            </span>
             <span className="min-w-0 flex-1 truncate text-xs text-muted">{pf.description}</span>
+            {pf.allow_src_cidrs.length > 0 && <Badge tone="neutral">nur {pf.allow_src_cidrs.length} Quelle(n)</Badge>}
+            {pf.deny_src_cidrs.length > 0 && <Badge tone="warn">{pf.deny_src_cidrs.length} blockiert</Badge>}
+            {pf.rate_limit_per_min ? <Badge tone="neutral">{pf.rate_limit_per_min}/min</Badge> : null}
             <button onClick={() => remove(pf.id!)} className="text-muted hover:text-bad">
               <Trash2 size={15} />
             </button>

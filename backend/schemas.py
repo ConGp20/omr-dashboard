@@ -9,7 +9,7 @@ import ipaddress
 from enum import Enum
 from typing import Any, Literal, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 # --------------------------------------------------------------------------- #
@@ -152,26 +152,68 @@ class ProtocolTuning(BaseModel):
 # --------------------------------------------------------------------------- #
 # VPS endpoint management
 # --------------------------------------------------------------------------- #
+def _validate_ip(v: str) -> str:
+    """Reject anything that is not a plain IP — the value is written verbatim
+    into the Shorewall DNAT rule, so it must never carry extra tokens."""
+    v = v.strip()
+    try:
+        ipaddress.ip_address(v)
+    except ValueError as exc:
+        raise ValueError("muss eine gültige IP-Adresse sein") from exc
+    return v
+
+
+def _validate_cidr(v: str) -> str:
+    v = v.strip()
+    try:
+        ipaddress.ip_network(v, strict=False)
+    except ValueError as exc:
+        raise ValueError(f"{v!r} ist kein gültiges CIDR (z. B. 203.0.113.0/24)") from exc
+    return v
+
+
+class IngressTarget(BaseModel):
+    """Extra weighted destination for load-balanced port forwarding (R2)."""
+    dest_ip: str
+    dest_port: int = Field(ge=1, le=65535)
+    weight: int = Field(default=1, ge=1, le=10)
+
+    @field_validator("dest_ip")
+    @classmethod
+    def _validate_dest_ip(cls, v: str) -> str:
+        return _validate_ip(v)
+
+
 class PortForward(BaseModel):
     id: Optional[str] = None
     description: str = ""
     proto: Literal["tcp", "udp", "tcp/udp"] = "tcp"
     src_port: int = Field(ge=1, le=65535)
+    src_port_end: Optional[int] = Field(
+        default=None, ge=1, le=65535,
+        description="Wenn gesetzt, wird ein Portbereich src_port..src_port_end weitergeleitet.",
+    )
     dest_ip: str
     dest_port: int = Field(ge=1, le=65535)
     enabled: bool = True
+    extra_targets: list[IngressTarget] = Field(
+        default_factory=list,
+        description="Weitere Ziele für gewichtete Lastverteilung (Round-Robin nach Gewicht).",
+    )
+    allow_src_cidrs: list[str] = Field(
+        default_factory=list,
+        description="Wenn gesetzt, ist die Weiterleitung nur von diesen Quell-Netzen aus erreichbar.",
+    )
+    deny_src_cidrs: list[str] = Field(
+        default_factory=list,
+        description="Diese Quell-Netze werden explizit blockiert, bevor die Weiterleitung greift.",
+    )
+    rate_limit_per_min: Optional[int] = Field(default=None, ge=1, le=100000)
 
     @field_validator("dest_ip")
     @classmethod
     def _validate_dest_ip(cls, v: str) -> str:
-        """Reject anything that is not a plain IP — the value is written verbatim
-        into the Shorewall DNAT rule, so it must never carry extra tokens."""
-        v = v.strip()
-        try:
-            ipaddress.ip_address(v)
-        except ValueError as exc:
-            raise ValueError("dest_ip muss eine gültige IP-Adresse sein") from exc
-        return v
+        return _validate_ip(v)
 
     @field_validator("description")
     @classmethod
@@ -179,6 +221,17 @@ class PortForward(BaseModel):
         """Collapse all whitespace so the description can't break out of the
         single-line shorewall rule/comment it is rendered into."""
         return " ".join(v.split())
+
+    @field_validator("allow_src_cidrs", "deny_src_cidrs")
+    @classmethod
+    def _validate_cidrs(cls, v: list[str]) -> list[str]:
+        return [_validate_cidr(c) for c in v]
+
+    @model_validator(mode="after")
+    def _validate_port_range(self) -> "PortForward":
+        if self.src_port_end is not None and self.src_port_end < self.src_port:
+            raise ValueError("src_port_end muss größer oder gleich src_port sein")
+        return self
 
 
 class ExitVpn(BaseModel):
@@ -297,6 +350,44 @@ class ComponentVersion(BaseModel):
 
 class VersionsResponse(BaseModel):
     components: list[ComponentVersion] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------- #
+# Settings (post-setup editable connection & security credentials)
+# --------------------------------------------------------------------------- #
+class ConnectionSettings(BaseModel):
+    router_ip: str
+    router_user: str
+    router_pass_set: bool = False
+    omr_admin_key_set: bool = False
+    overridden: list[str] = Field(default_factory=list)
+
+
+class ConnectionSettingsUpdate(BaseModel):
+    router_ip: Optional[str] = None
+    router_user: Optional[str] = None
+    router_pass: Optional[str] = None
+    omr_admin_key: Optional[str] = None
+
+
+class ConnectionTestResult(BaseModel):
+    router_reachable: bool = False
+    router_detail: str = ""
+    omr_admin_reachable: bool = False
+    omr_admin_detail: str = ""
+
+
+class SecuritySettings(BaseModel):
+    dashboard_user: str
+    dashboard_pass_set: bool = False
+    jwt_secret_set: bool = False
+    overridden: list[str] = Field(default_factory=list)
+
+
+class SecuritySettingsUpdate(BaseModel):
+    dashboard_user: Optional[str] = None
+    dashboard_pass: Optional[str] = None
+    jwt_secret: Optional[str] = None
 
 
 # --------------------------------------------------------------------------- #
