@@ -37,8 +37,6 @@ class Aggregator:
     def __init__(self, store: MetricsStore) -> None:
         self.settings = get_settings()
         self.store = store
-        self.omr = OmrProxy()
-        self.router = RouterProxy()
         self.shorewall = ShorewallService()
         self._latest: Optional[DashboardStatus] = None
         self._subscribers: set[asyncio.Queue] = set()
@@ -100,10 +98,15 @@ class Aggregator:
             await asyncio.sleep(self.settings.poll_interval_seconds)
 
     async def _collect(self) -> DashboardStatus:
-        status = await self.omr.status()
-        # In real mode, enrich with router-reported per-link metrics.
+        # Create fresh proxy instances so credential overrides (R0) are always
+        # picked up without requiring an aggregator restart.
+        omr = OmrProxy()
+        status = await omr.status()
+        # In real mode, fall back to router-detected WANs when omr-admin returns
+        # no link data (e.g. tunnel not yet established).
         if not self.settings.demo and not status.links:
-            wans = await self.router.detect_wans()
+            router = RouterProxy()
+            wans = await router.detect_wans()
             status.links = [
                 LinkStatus(
                     id=w.id, label=w.label or w.id, type=w.detected_type,
@@ -114,7 +117,7 @@ class Aggregator:
             ]
             active = [l for l in status.links if l.state == LinkState.up]
             status.active_links = len(active)
-            status.total_links = len([l for l in status.links if l.enabled])
+            status.total_links = sum(1 for l in status.links if l.enabled)
         return status
 
     async def _detect_events(self, status: DashboardStatus) -> None:
@@ -125,7 +128,7 @@ class Aggregator:
                     await self.store.add_event(Event(
                         ts=int(time.time()), type="link_down",
                         detail=f"{link.label} ist ausgefallen", severity="warn"))
-                elif link.state == LinkState.up and prev == LinkState.down:
+                elif link.state == LinkState.up:
                     await self.store.add_event(Event(
                         ts=int(time.time()), type="link_up",
                         detail=f"{link.label} ist wieder verbunden", severity="info"))

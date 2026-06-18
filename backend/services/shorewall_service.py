@@ -76,9 +76,10 @@ class ShorewallService:
         if self.settings.demo:
             _demo_forwards.append(pf)
             return pf
-        forwards = self._parse_forwards()
+        raw = self._read_lines()
+        forwards = self._parse_forwards(raw)
         forwards.append(pf)
-        self._write_forwards(forwards)
+        self._write_forwards(forwards, raw)
         self._apply()
         return pf
 
@@ -90,7 +91,8 @@ class ShorewallService:
                     _demo_forwards[i] = pf
                     return pf
             return None
-        forwards = self._parse_forwards()
+        raw = self._read_lines()
+        forwards = self._parse_forwards(raw)
         found = False
         for i, existing in enumerate(forwards):
             if existing.id == pf_id:
@@ -98,7 +100,7 @@ class ShorewallService:
                 found = True
         if not found:
             return None
-        self._write_forwards(forwards)
+        self._write_forwards(forwards, raw)
         self._apply()
         return pf
 
@@ -107,11 +109,12 @@ class ShorewallService:
             before = len(_demo_forwards)
             _demo_forwards[:] = [f for f in _demo_forwards if f.id != pf_id]
             return len(_demo_forwards) < before
-        forwards = self._parse_forwards()
+        raw = self._read_lines()
+        forwards = self._parse_forwards(raw)
         new = [f for f in forwards if f.id != pf_id]
         if len(new) == len(forwards):
             return False
-        self._write_forwards(new)
+        self._write_forwards(new, raw)
         self._apply()
         return True
 
@@ -122,12 +125,12 @@ class ShorewallService:
         with open(self.path) as fh:
             return fh.read().splitlines()
 
-    def _parse_forwards(self) -> list[PortForward]:
+    def _parse_forwards(self, lines: Optional[list[str]] = None) -> list[PortForward]:
         forwards: dict[str, PortForward] = {}
         order: list[str] = []
         deny_map: dict[str, list[str]] = {}
         in_block = False
-        for line in self._read_lines():
+        for line in (lines if lines is not None else self._read_lines()):
             stripped = line.strip()
             if stripped == _BEGIN:
                 in_block = True
@@ -163,7 +166,7 @@ class ShorewallService:
     def _parse_deny_line(line: str) -> tuple[Optional[str], str]:
         # DROP    net:CIDR    loc:IP:PORT    proto    dport  -  -  -  # id=.. desc=..._deny
         try:
-            code, comment = (line.split("#", 1) + [""])[:2]
+            code, _, comment = line.partition("#")
             parts = code.split()
             source = parts[1]
             cidr = source.split(":", 1)[1] if source.startswith("net:") else source
@@ -176,7 +179,7 @@ class ShorewallService:
     def _parse_dnat_line(line: str) -> Optional[PortForward]:
         # DNAT[ -] source dest proto dport [sport origdest ratelimit]  # id=.. desc=..
         try:
-            code, comment = (line.split("#", 1) + [""])[:2]
+            code, _, comment = line.partition("#")
             parts = code.split()
             if not parts or not parts[0].startswith("DNAT"):
                 return None
@@ -278,8 +281,8 @@ class ShorewallService:
             )
         return lines
 
-    def _write_forwards(self, forwards: list[PortForward]) -> None:
-        lines = self._read_lines()
+    def _write_forwards(self, forwards: list[PortForward], lines: Optional[list[str]] = None) -> None:
+        lines = lines if lines is not None else self._read_lines()
         # strip existing managed block
         out: list[str] = []
         in_block = False

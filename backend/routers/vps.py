@@ -92,10 +92,7 @@ async def routing(_: str = Depends(require_user)) -> dict:
     """Simplified routing overview."""
     settings = get_settings()
     exit_vpn = WireguardService().get_exit_vpn()
-    if settings.demo or not exit_vpn.enabled:
-        default = "exit-vpn" if exit_vpn.enabled else "direct"
-    else:
-        default = "exit-vpn" if exit_vpn.enabled else "direct"
+    default = "exit-vpn" if exit_vpn.enabled else "direct"
     return {
         "default_exit": default,
         "exit_vpn_enabled": exit_vpn.enabled,

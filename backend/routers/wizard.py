@@ -109,7 +109,13 @@ async def apply(payload: WizardApply, _: str = Depends(require_user)) -> WizardA
     if tunnel_up:
         if settings.demo:
             download, upload = 142.5, 28.3
-        steps.append(WizardApplyStep(step="Geschwindigkeitstest", ok=True))
+            steps.append(WizardApplyStep(
+                step="Geschwindigkeitstest", ok=True,
+                detail=f"↓ {download} Mbps  ↑ {upload} Mbps"))
+        else:
+            steps.append(WizardApplyStep(
+                step="Geschwindigkeitstest", ok=True,
+                detail="Übersprungen — unter /diagnostics verfügbar"))
 
     await get_store().add_event(Event(
         ts=int(time.time()), type="wizard_apply",

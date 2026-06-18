@@ -57,6 +57,10 @@ function BackupRestore() {
       const fd = new FormData();
       fd.append("password", pw);
       const res = await fetch("/api/system/backup", { method: "POST", body: fd });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ detail: `HTTP ${res.status}` }));
+        throw new Error(err.detail ?? `HTTP ${res.status}`);
+      }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
@@ -65,6 +69,8 @@ function BackupRestore() {
       a.click();
       URL.revokeObjectURL(url);
       setMsg("Backup heruntergeladen.");
+    } catch (e) {
+      setMsg(`Fehler: ${(e as Error).message}`);
     } finally {
       setBusy(false);
     }
