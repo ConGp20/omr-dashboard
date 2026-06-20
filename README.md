@@ -50,18 +50,35 @@ cd frontend && npm install
 BACKEND_URL=http://127.0.0.1:8000 npm run dev
 ```
 
-## Production (on the VPS)
+## Production (on an existing OMR VPS)
+
+The dashboard is a **self-contained sidecar**: it installs *next to* a working
+OpenMPTCProuter VPS without modifying the OMR installation. Easiest path — run
+the bundled installer on the VPS:
 
 ```bash
-cd dashboard
+git clone https://github.com/ConGp20/omr-dashboard.git /opt/omr-dashboard
+cd /opt/omr-dashboard
+./install.sh --bind 10.255.247.1      # bind to your WireGuard tunnel IP
+```
+
+`install.sh` auto-detects the `omr-admin` server key from the existing
+`omr-admin-config.json`, writes `.env`, installs Docker if needed, and starts
+the stack. Run `./install.sh --help` for all flags (`--router-pass`, `--demo`,
+`--no-start`, …). Nothing in the OMR install is changed.
+
+Or do it by hand:
+
+```bash
 cp .env.example .env       # set OMR_ADMIN_KEY, ROUTER_PASS, BIND_ADDR, JWT_SECRET
 docker compose up -d --build
 ```
 
 Then reach it **through the router** at `http://<BIND_ADDR>:3000` (see Security).
 
-The VPS install script can also do this for you with `DASHBOARD=yes` — it writes
-`.env` from the generated config and starts the stack.
+For a **fresh** VPS, the OMR VPS install script can also pull the dashboard in
+with `DASHBOARD=yes` — it git-clones this repo, writes `.env` from the generated
+config, and starts the stack.
 
 ---
 
