@@ -320,6 +320,81 @@ class Event(BaseModel):
 
 
 # --------------------------------------------------------------------------- #
+# Monthly data usage (per WAN), for tracking ISP volume limits
+# --------------------------------------------------------------------------- #
+class LinkUsage(BaseModel):
+    link_id: str
+    label: str = ""
+    rx_bytes: float = 0.0
+    tx_bytes: float = 0.0
+    total_bytes: float = 0.0
+    cap_gb: Optional[float] = None      # monthly cap in GB; None = no limit set
+    warn_pct: int = 80                  # warn threshold, percent of the cap
+    used_pct: Optional[float] = None    # total vs cap; None when no cap is set
+    over_warn: bool = False
+    over_cap: bool = False
+
+
+class UsageResponse(BaseModel):
+    month: str                          # "YYYY-MM" (UTC)
+    total_bytes: float = 0.0
+    links: list[LinkUsage] = Field(default_factory=list)
+
+
+class QuotaUpdate(BaseModel):
+    cap_gb: Optional[float] = Field(default=None, ge=0)   # 0/None clears the cap
+    warn_pct: Optional[int] = Field(default=None, ge=1, le=100)
+
+
+# --------------------------------------------------------------------------- #
+# Alerts / notifications
+# --------------------------------------------------------------------------- #
+class AlertConfigUpdate(BaseModel):
+    """Partial update of the alert channel configuration.
+
+    All fields optional: only provided values are applied. Empty strings on
+    secret fields are ignored so a save that doesn't re-enter the secret keeps
+    the stored one.
+    """
+    min_severity: Optional[Literal["warn", "error"]] = None
+    telegram_enabled: Optional[bool] = None
+    telegram_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    webhook_enabled: Optional[bool] = None
+    webhook_url: Optional[str] = None
+    email_enabled: Optional[bool] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    smtp_user: Optional[str] = None
+    smtp_pass: Optional[str] = None
+    smtp_tls: Optional[bool] = None
+    email_from: Optional[str] = None
+    email_to: Optional[str] = None
+
+
+class AlertConfigPublic(BaseModel):
+    """Alert config as returned to the UI — secrets masked to booleans."""
+    min_severity: str = "warn"
+    telegram_enabled: bool = False
+    telegram_chat_id: Optional[str] = None
+    telegram_token_set: bool = False
+    webhook_enabled: bool = False
+    webhook_url: Optional[str] = None
+    email_enabled: bool = False
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_pass_set: bool = False
+    smtp_tls: bool = True
+    email_from: Optional[str] = None
+    email_to: Optional[str] = None
+
+
+class AlertTestResult(BaseModel):
+    results: dict[str, str] = Field(default_factory=dict)  # channel -> outcome
+
+
+# --------------------------------------------------------------------------- #
 # Diagnostics
 # --------------------------------------------------------------------------- #
 class PingRequest(BaseModel):

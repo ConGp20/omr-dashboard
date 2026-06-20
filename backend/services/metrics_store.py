@@ -39,7 +39,26 @@ CREATE TABLE IF NOT EXISTS speedtest_results (
     link_id TEXT,
     rx_mbps REAL, tx_mbps REAL, server TEXT
 );
+
+CREATE TABLE IF NOT EXISTS monthly_usage (
+    month TEXT NOT NULL,          -- 'YYYY-MM' (UTC)
+    link_id TEXT NOT NULL,
+    rx_bytes REAL NOT NULL DEFAULT 0,
+    tx_bytes REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (month, link_id)
+);
+
+CREATE TABLE IF NOT EXISTS link_quota (
+    link_id TEXT PRIMARY KEY,
+    cap_gb REAL,                  -- monthly cap in GB; NULL = no limit
+    warn_pct INTEGER NOT NULL DEFAULT 80
+);
 """
+
+
+def current_month() -> str:
+    """The current accounting month as ``YYYY-MM`` in UTC."""
+    return time.strftime("%Y-%m", time.gmtime())
 
 _PERIOD_SECONDS = {
     "1h": 3600,
@@ -101,7 +120,63 @@ class MetricsStore:
                 )
         await asyncio.to_thread(_ins)
 
+    async def add_usage(self, month: str, rows: list[tuple]) -> None:
+        """Accumulate per-link byte deltas into the month's running totals.
+
+        ``rows`` is ``[(link_id, rx_bytes, tx_bytes), ...]`` — the bytes seen in
+        one poll interval. UPSERT keeps a single row per link per month.
+        """
+        if not rows:
+            return
+        await asyncio.to_thread(self._add_usage, month, rows)
+
+    def _add_usage(self, month: str, rows: list[tuple]) -> None:
+        with self._lock, self._conn:
+            self._conn.executemany(
+                "INSERT INTO monthly_usage (month, link_id, rx_bytes, tx_bytes)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(month, link_id) DO UPDATE SET"
+                "   rx_bytes = rx_bytes + excluded.rx_bytes,"
+                "   tx_bytes = tx_bytes + excluded.tx_bytes",
+                [(month, lid, rx, tx) for (lid, rx, tx) in rows],
+            )
+
+    async def set_quota(self, link_id: str, cap_gb: Optional[float], warn_pct: int) -> None:
+        await asyncio.to_thread(self._set_quota, link_id, cap_gb, warn_pct)
+
+    def _set_quota(self, link_id: str, cap_gb: Optional[float], warn_pct: int) -> None:
+        with self._lock, self._conn:
+            self._conn.execute(
+                "INSERT INTO link_quota (link_id, cap_gb, warn_pct) VALUES (?, ?, ?)"
+                " ON CONFLICT(link_id) DO UPDATE SET"
+                "   cap_gb = excluded.cap_gb, warn_pct = excluded.warn_pct",
+                (link_id, cap_gb, warn_pct),
+            )
+
     # --- reads -------------------------------------------------------------
+    async def usage(self, month: str) -> dict[str, tuple]:
+        """Per-link accumulated ``(rx_bytes, tx_bytes)`` for ``month``."""
+        rows = await asyncio.to_thread(self._usage, month)
+        return {r[0]: (r[1], r[2]) for r in rows}
+
+    def _usage(self, month: str) -> list[tuple]:
+        with self._lock:
+            cur = self._conn.execute(
+                "SELECT link_id, rx_bytes, tx_bytes FROM monthly_usage"
+                " WHERE month = ? ORDER BY link_id",
+                (month,),
+            )
+            return cur.fetchall()
+
+    async def quotas(self) -> dict[str, dict]:
+        rows = await asyncio.to_thread(self._quotas)
+        return {r[0]: {"cap_gb": r[1], "warn_pct": r[2]} for r in rows}
+
+    def _quotas(self) -> list[tuple]:
+        with self._lock:
+            cur = self._conn.execute("SELECT link_id, cap_gb, warn_pct FROM link_quota")
+            return cur.fetchall()
+
     async def metrics(self, period: str) -> list[MetricPoint]:
         window = _PERIOD_SECONDS.get(period, 3600)
         since = int(time.time()) - window
@@ -160,9 +235,13 @@ class MetricsStore:
         await asyncio.to_thread(self._prune, cutoff)
 
     def _prune(self, cutoff: int) -> None:
+        # Keep monthly usage far longer than the high-resolution metrics so the
+        # volume history survives — only drop months older than ~13 months.
+        usage_cutoff = time.strftime("%Y-%m", time.gmtime(time.time() - 396 * 86400))
         with self._lock, self._conn:
             self._conn.execute("DELETE FROM link_metrics WHERE ts < ?", (cutoff,))
             self._conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+            self._conn.execute("DELETE FROM monthly_usage WHERE month < ?", (usage_cutoff,))
 
     def close(self) -> None:
         self._conn.close()

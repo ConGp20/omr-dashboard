@@ -220,3 +220,43 @@ export interface ConfigMap {
   vps: ConfigMapItem[];
   sync: ConfigMapItem[];
 }
+
+export interface LinkUsage {
+  link_id: string;
+  label: string;
+  rx_bytes: number;
+  tx_bytes: number;
+  total_bytes: number;
+  cap_gb?: number | null;
+  warn_pct: number;
+  used_pct?: number | null;
+  over_warn: boolean;
+  over_cap: boolean;
+}
+
+export interface UsageResponse {
+  month: string;
+  total_bytes: number;
+  links: LinkUsage[];
+}
+
+export interface AlertConfigPublic {
+  min_severity: "warn" | "error";
+  telegram_enabled: boolean;
+  telegram_chat_id?: string | null;
+  telegram_token_set: boolean;
+  webhook_enabled: boolean;
+  webhook_url?: string | null;
+  email_enabled: boolean;
+  smtp_host?: string | null;
+  smtp_port: number;
+  smtp_user?: string | null;
+  smtp_pass_set: boolean;
+  smtp_tls: boolean;
+  email_from?: string | null;
+  email_to?: string | null;
+}
+
+export interface AlertTestResult {
+  results: Record<string, string>;
+}

@@ -1,11 +1,12 @@
-"""Historical metrics and event log."""
+"""Historical metrics, event log and monthly data-usage tracking."""
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException
 
 from auth import require_user
-from deps import get_store
-from schemas import Event, MetricsResponse
+from deps import get_aggregator, get_store
+from schemas import Event, LinkUsage, MetricsResponse, QuotaUpdate, UsageResponse
+from services.metrics_store import current_month
 
 router = APIRouter(prefix="/dashboard", tags=["metrics"])
 
@@ -23,3 +24,47 @@ async def metrics(period: str, _: str = Depends(require_user)) -> MetricsRespons
 @router.get("/events", response_model=list[Event])
 async def events(limit: int = 50, _: str = Depends(require_user)) -> list[Event]:
     return await get_store().events(limit=limit)
+
+
+def _link_usage(link_id: str, label: str, rx: float, tx: float, quota: dict) -> LinkUsage:
+    total = rx + tx
+    cap_gb = quota.get("cap_gb")
+    warn_pct = quota.get("warn_pct") or 80
+    cap_bytes = cap_gb * 1e9 if cap_gb else None
+    return LinkUsage(
+        link_id=link_id, label=label, rx_bytes=rx, tx_bytes=tx, total_bytes=total,
+        cap_gb=cap_gb, warn_pct=warn_pct,
+        used_pct=(total / cap_bytes * 100.0) if cap_bytes else None,
+        over_warn=bool(cap_bytes and total >= cap_bytes * warn_pct / 100.0),
+        over_cap=bool(cap_bytes and total >= cap_bytes),
+    )
+
+
+@router.get("/usage", response_model=UsageResponse)
+async def usage(_: str = Depends(require_user)) -> UsageResponse:
+    store = get_store()
+    month = current_month()
+    raw = await store.usage(month)
+    quotas = await store.quotas()
+    labels = {l.id: l.label for l in (await get_aggregator().status()).links}
+    ids = set(raw) | set(quotas) | set(labels)
+    links: list[LinkUsage] = []
+    total = 0.0
+    for link_id in sorted(ids):
+        rx, tx = raw.get(link_id, (0.0, 0.0))
+        total += rx + tx
+        links.append(_link_usage(link_id, labels.get(link_id, link_id), rx, tx,
+                                 quotas.get(link_id, {})))
+    return UsageResponse(month=month, total_bytes=total, links=links)
+
+
+@router.put("/usage/{link_id}/quota", response_model=LinkUsage)
+async def set_quota(link_id: str, payload: QuotaUpdate, _: str = Depends(require_user)) -> LinkUsage:
+    store = get_store()
+    cap_gb = payload.cap_gb if (payload.cap_gb and payload.cap_gb > 0) else None
+    warn_pct = payload.warn_pct or 80
+    await store.set_quota(link_id, cap_gb, warn_pct)
+    rx, tx = (await store.usage(current_month())).get(link_id, (0.0, 0.0))
+    labels = {l.id: l.label for l in (await get_aggregator().status()).links}
+    return _link_usage(link_id, labels.get(link_id, link_id), rx, tx,
+                       {"cap_gb": cap_gb, "warn_pct": warn_pct})

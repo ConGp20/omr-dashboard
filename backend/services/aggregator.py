@@ -27,7 +27,7 @@ from schemas import (
     TopoNode,
     Topology,
 )
-from services.metrics_store import MetricsStore
+from services.metrics_store import MetricsStore, current_month
 from services.omr_proxy import OmrProxy
 from services.router_proxy import RouterProxy
 from services.shorewall_service import ShorewallService
@@ -43,6 +43,9 @@ class Aggregator:
         self._prev_link_state: dict[str, LinkState] = {}
         self._task: Optional[asyncio.Task] = None
         self._prune_counter = 0
+        # (month, link_id, level) tuples already alerted on, so a crossed
+        # data-quota threshold fires its event only once per month.
+        self._usage_alerted: set[tuple[str, str, str]] = set()
 
     # --- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
@@ -86,6 +89,7 @@ class Aggregator:
                 status = await self._collect()
                 self._latest = status
                 await self.store.record_links(status.links)
+                await self._accumulate_usage(status)
                 await self._detect_events(status)
                 await self._publish(status)
 
@@ -120,23 +124,83 @@ class Aggregator:
             status.total_links = sum(1 for l in status.links if l.enabled)
         return status
 
+    async def _emit(self, event: Event) -> None:
+        """Persist an event and fan it out to the alert channels.
+
+        Single choke point for event creation so notifications stay in sync
+        with the event log without every call-site needing to know about them.
+        """
+        await self.store.add_event(event)
+        from services import alerts_service
+        await alerts_service.dispatch(event)
+
     async def _detect_events(self, status: DashboardStatus) -> None:
         for link in status.links:
             prev = self._prev_link_state.get(link.id)
             if prev is not None and prev != link.state:
                 if link.state == LinkState.down:
-                    await self.store.add_event(Event(
+                    await self._emit(Event(
                         ts=int(time.time()), type="link_down",
                         detail=f"{link.label} ist ausgefallen", severity="warn"))
                 elif link.state == LinkState.up:
-                    await self.store.add_event(Event(
+                    await self._emit(Event(
                         ts=int(time.time()), type="link_up",
                         detail=f"{link.label} ist wieder verbunden", severity="info"))
                 elif link.state == LinkState.degraded:
-                    await self.store.add_event(Event(
+                    await self._emit(Event(
                         ts=int(time.time()), type="link_degraded",
                         detail=f"{link.label} ist beeinträchtigt", severity="warn"))
             self._prev_link_state[link.id] = link.state
+
+    async def _accumulate_usage(self, status: DashboardStatus) -> None:
+        """Integrate per-link throughput into the month's volume counters and
+        fire one-shot events when a configured data cap threshold is crossed."""
+        interval = self.settings.poll_interval_seconds
+        month = current_month()
+        rows = [
+            (l.id, max(0.0, l.rx_bps) * interval / 8.0, max(0.0, l.tx_bps) * interval / 8.0)
+            for l in status.links
+            if l.enabled and l.state != LinkState.disabled
+        ]
+        if not rows:
+            return
+        await self.store.add_usage(month, rows)
+        await self._check_quota_alerts(status, month)
+
+    async def _check_quota_alerts(self, status: DashboardStatus, month: str) -> None:
+        quotas = await self.store.quotas()
+        if not quotas:
+            return
+        usage = await self.store.usage(month)
+        labels = {l.id: l.label for l in status.links}
+        # Forget thresholds tracked for past months so the set stays bounded.
+        self._usage_alerted = {k for k in self._usage_alerted if k[0] == month}
+        for link_id, q in quotas.items():
+            cap_gb = q.get("cap_gb")
+            if not cap_gb:
+                continue
+            cap_bytes = cap_gb * 1e9
+            warn_pct = q.get("warn_pct") or 80
+            rx, tx = usage.get(link_id, (0.0, 0.0))
+            total = rx + tx
+            label = labels.get(link_id, link_id)
+            if total >= cap_bytes:
+                await self._maybe_quota_event(
+                    month, link_id, "cap", "error",
+                    f"{label}: Monats-Datenlimit erreicht ({cap_gb:g} GB)")
+            elif total >= cap_bytes * warn_pct / 100.0:
+                await self._maybe_quota_event(
+                    month, link_id, "warn", "warn",
+                    f"{label}: {warn_pct}% des Monatslimits erreicht ({cap_gb:g} GB)")
+
+    async def _maybe_quota_event(self, month: str, link_id: str, level: str,
+                                 severity: str, detail: str) -> None:
+        key = (month, link_id, level)
+        if key in self._usage_alerted:
+            return
+        self._usage_alerted.add(key)
+        await self._emit(Event(ts=int(time.time()), type=f"quota_{level}",
+                               detail=detail, severity=severity))
 
     # --- public accessors --------------------------------------------------
     async def status(self) -> DashboardStatus:

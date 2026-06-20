@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 import deps
 from config import get_settings
 from routers import (
+    alerts,
     auth_router,
     configmap,
     diagnostics,
@@ -90,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(configmap.router)
     app.include_router(wizard.router)
     app.include_router(settings_router.router)
+    app.include_router(alerts.router)
 
     @app.get("/health", tags=["meta"])
     async def health() -> dict:
