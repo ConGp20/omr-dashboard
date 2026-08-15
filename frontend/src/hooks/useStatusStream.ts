@@ -8,11 +8,12 @@ import type { DashboardStatus } from "@/lib/types";
  * Zustand store updated with live status. Falls back to polling if the stream
  * cannot be established.
  */
-export function useStatusStream() {
+export function useStatusStream({ enabled = true }: { enabled?: boolean } = {}) {
   const setStatus = useDashboardStore((s) => s.setStatus);
   const setConnected = useDashboardStore((s) => s.setConnected);
 
   useEffect(() => {
+    if (!enabled) return;
     let es: EventSource | null = null;
     let pollTimer: ReturnType<typeof setInterval> | null = null;
     let stopped = false;
@@ -54,5 +55,5 @@ export function useStatusStream() {
       es?.close();
       if (pollTimer) clearInterval(pollTimer);
     };
-  }, [setStatus, setConnected]);
+  }, [setStatus, setConnected, enabled]);
 }

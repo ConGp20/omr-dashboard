@@ -6,6 +6,7 @@ dependency is permissive in demo mode so the UI is immediately usable.
 """
 from __future__ import annotations
 
+import secrets
 import time
 
 from fastapi import Depends, HTTPException, status
@@ -22,6 +23,50 @@ def _expected_password() -> str:
     return s.dashboard_pass or s.omr_admin_key
 
 
+def auth_required() -> bool:
+    """Whether clients must present a token.
+
+    False in demo mode and on a fresh install with no password configured —
+    the UI uses this to skip the login screen instead of showing a form that
+    would accept anything.
+    """
+    s = get_settings()
+    return not s.demo and bool(_expected_password())
+
+
+# --- brute-force protection ------------------------------------------------
+# The dashboard is meant to sit behind the management tunnel, but it only takes
+# one misconfigured BIND_ADDR for the login to face the internet. Throttling
+# costs nothing and removes online password guessing as an option.
+MAX_ATTEMPTS = 5
+LOCKOUT_SECONDS = 300
+
+_failures: dict[str, list[float]] = {}
+
+
+def lockout_remaining(client: str, now: float | None = None) -> float:
+    """Seconds until ``client`` may try again; 0 when it is not locked out."""
+    now = time.time() if now is None else now
+    recent = [t for t in _failures.get(client, []) if now - t < LOCKOUT_SECONDS]
+    _failures[client] = recent
+    if len(recent) < MAX_ATTEMPTS:
+        return 0.0
+    return LOCKOUT_SECONDS - (now - recent[-MAX_ATTEMPTS])
+
+
+def record_failure(client: str, now: float | None = None) -> None:
+    now = time.time() if now is None else now
+    _failures.setdefault(client, []).append(now)
+
+
+def reset_failures(client: str | None = None) -> None:
+    """Clear throttling state — on success for one client, or all of it."""
+    if client is None:
+        _failures.clear()
+    else:
+        _failures.pop(client, None)
+
+
 def verify_credentials(username: str, password: str) -> bool:
     s = get_settings()
     if s.demo:
@@ -30,7 +75,8 @@ def verify_credentials(username: str, password: str) -> bool:
     if not expected:
         # No password configured yet (fresh install) — allow first use.
         return True
-    return username == s.dashboard_user and password == expected
+    # Compare in constant time so a wrong password cannot be found by timing.
+    return username == s.dashboard_user and secrets.compare_digest(password, expected)
 
 
 def create_token(username: str) -> str:

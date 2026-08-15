@@ -20,6 +20,24 @@ export default function QosPage() {
   const { data: domains, refetch: refetchDomains } = useApi<DomainRule[]>("/qos/domains");
   const [newDomain, setNewDomain] = useState("");
   const [target, setTarget] = useState("vpn");
+  const presets = useApi<{ presets: Record<string, string[]> }>("/qos/domain-presets");
+  const [bulkBusy, setBulkBusy] = useState(false);
+
+  const addPreset = async (name: string) => {
+    // Skip domains that are already routed, so clicking a preset twice does not
+    // pile up duplicate rules.
+    const existing = new Set((domains ?? []).map((d) => d.domain));
+    setBulkBusy(true);
+    try {
+      for (const domain of presets.data?.presets?.[name] ?? []) {
+        if (existing.has(domain)) continue;
+        await api.post("/qos/domains", { domain, target });
+      }
+      refetchDomains();
+    } finally {
+      setBulkBusy(false);
+    }
+  };
 
   const setProfile = async (id: string) => {
     await api.put("/qos/profile", { active: id, available: [] });
@@ -79,6 +97,16 @@ export default function QosPage() {
               <option value="block">Blockieren</option>
             </Select>
             <Button onClick={addDomain}><Plus size={14} /></Button>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 border-t border-border pt-2">
+            <span className="text-xs text-muted">Vorlagen (fügt alle Domains des Dienstes hinzu):</span>
+            {Object.keys(presets.data?.presets ?? {}).map((name) => (
+              <Button key={name} size="sm" variant="outline" disabled={bulkBusy}
+                      onClick={() => addPreset(name)}>
+                {name}
+              </Button>
+            ))}
           </div>
           {(domains ?? []).map((d) => (
             <div key={d.id} className="flex items-center gap-3 rounded-lg border border-border p-2 text-sm">

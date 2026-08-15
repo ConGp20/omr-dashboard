@@ -261,3 +261,15 @@ export interface AlertConfigPublic {
 export interface AlertTestResult {
   results: Record<string, string>;
 }
+
+export interface AuthStatus {
+  auth_required: boolean;
+  demo: boolean;
+  username: string;
+}
+
+export interface RoutingOverview {
+  default_exit: string;
+  exit_vpn_enabled: boolean;
+  routes: { destination: string; via: string }[];
+}

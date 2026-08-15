@@ -11,9 +11,10 @@ import { useStatusStream } from "@/hooks/useStatusStream";
  */
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
-  useStatusStream();
-
   const fullBleed = pathname === "/wizard" || pathname === "/login";
+  // Don't open the authenticated event stream on the login screen — it would
+  // just 401 in a loop while the user is trying to sign in.
+  useStatusStream({ enabled: pathname !== "/login" });
 
   if (fullBleed) {
     return (

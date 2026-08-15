@@ -1,10 +1,10 @@
 "use client";
 import { useState } from "react";
-import { Star, Network, Check, Loader2 } from "lucide-react";
+import { Star, Network, Check, Loader2, SlidersHorizontal } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { OwnerBadge } from "@/components/OwnerBadge";
 import {
-  Card, CardHeader, CardTitle, CardContent, Button, Badge, Select,
+  Card, CardHeader, CardTitle, CardContent, Button, Badge, Select, Input, Label,
 } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
@@ -18,6 +18,28 @@ export default function ProtocolsPage() {
   const { data: schedData } = useApi<{ schedulers: Scheduler[] }>("/protocols/schedulers");
   const [switching, setSwitching] = useState<string | null>(null);
   const [scheduler, setScheduler] = useState("default");
+  const [tune, setTune] = useState({ mtu: "", congestion: "", tfo: "" });
+  const [tuning, setTuning] = useState(false);
+  const [tuneMsg, setTuneMsg] = useState<string | null>(null);
+  const tuneDirty = !!(tune.mtu || tune.congestion || tune.tfo);
+
+  const applyTune = async () => {
+    setTuning(true);
+    setTuneMsg(null);
+    try {
+      const payload: Record<string, unknown> = {};
+      if (tune.mtu) payload.mtu = Number(tune.mtu);
+      if (tune.congestion) payload.congestion = tune.congestion;
+      if (tune.tfo) payload.tcp_fast_open = tune.tfo === "on";
+      const res = await api.put<{ applied: Record<string, string> }>("/protocols/tune", payload);
+      const n = Object.keys(res.applied ?? {}).length;
+      setTuneMsg(n ? `${n} Einstellung(en) übernommen.` : "Nichts zu ändern.");
+    } catch (e) {
+      setTuneMsg(`Fehler: ${(e as Error).message}`);
+    } finally {
+      setTuning(false);
+    }
+  };
 
   const doSwitch = async (id: string) => {
     if (!confirm("Protokoll wechseln? Die Verbindung wird für einige Sekunden unterbrochen.")) return;
@@ -106,6 +128,51 @@ export default function ProtocolsPage() {
                 <span className="ml-2 text-xs text-muted">{s.description}</span>
               </div>
             ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card className="mt-4">
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2"><SlidersHorizontal size={16} /> Feinabstimmung</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-muted">
+            Optional — die Standardwerte passen für die meisten Anschlüsse. Ändere
+            hier nur etwas, wenn Du ein konkretes Problem verfolgst. Den passenden
+            MTU-Wert ermittelt <strong>Diagnose → MTU-Empfehlung</strong>.
+          </p>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <div>
+              <Label>MTU</Label>
+              <Input type="number" min={576} max={9000} placeholder="z. B. 1440"
+                     value={tune.mtu} onChange={(e) => setTune({ ...tune, mtu: e.target.value })} />
+            </div>
+            <div>
+              <Label>Congestion-Control</Label>
+              <Select value={tune.congestion}
+                      onChange={(e) => setTune({ ...tune, congestion: e.target.value })}>
+                <option value="">unverändert</option>
+                <option value="bbr">BBR (empfohlen)</option>
+                <option value="cubic">CUBIC</option>
+                <option value="reno">Reno</option>
+              </Select>
+            </div>
+            <div>
+              <Label>TCP Fast Open</Label>
+              <Select value={tune.tfo}
+                      onChange={(e) => setTune({ ...tune, tfo: e.target.value })}>
+                <option value="">unverändert</option>
+                <option value="on">ein</option>
+                <option value="off">aus</option>
+              </Select>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Button size="sm" onClick={applyTune} disabled={tuning || !tuneDirty}>
+              {tuning ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />} Übernehmen
+            </Button>
+            {tuneMsg && <span className="text-xs text-muted">{tuneMsg}</span>}
           </div>
         </CardContent>
       </Card>

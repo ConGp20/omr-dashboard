@@ -9,6 +9,18 @@ import type { ComponentVersion, ConnectionSettings, ConnectionTestResult, Securi
 
 function Versions() {
   const { data } = useApi<{ components: ComponentVersion[] }>("/system/versions");
+  const [hint, setHint] = useState<string | null>(null);
+  const anyUpdate = (data?.components ?? []).some((c) => c.update_available);
+
+  const runUpdate = async () => {
+    try {
+      const res = await api.post<{ success: boolean; detail?: string }>("/system/update");
+      setHint(res.detail ?? (res.success ? "Update gestartet." : "Kein Update ausgeführt."));
+    } catch (e) {
+      setHint(`Fehler: ${(e as Error).message}`);
+    }
+  };
+
   return (
     <Card>
       <CardHeader><CardTitle>Versionen & Updates</CardTitle></CardHeader>
@@ -39,6 +51,17 @@ function Versions() {
             ))}
           </tbody>
         </table>
+        {anyUpdate && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-border pt-3">
+            <Button size="sm" variant="outline" onClick={runUpdate}>
+              <ArrowUpCircle size={14} /> Update ausführen
+            </Button>
+            <span className="text-xs text-muted">
+              Aktualisiert die OMR-Komponenten auf dem VPS.
+            </span>
+          </div>
+        )}
+        {hint && <p className="mt-2 text-sm text-fg">{hint}</p>}
       </CardContent>
     </Card>
   );
@@ -77,11 +100,38 @@ function BackupRestore() {
   };
 
   const restore = async (file: File) => {
-    const pw = prompt("Passwort des Backups:");
-    if (!pw) return;
     setBusy(true);
     setMsg(null);
     try {
+      // Show what is in the file before overwriting anything — the password is
+      // only needed for the actual restore, not for this preview.
+      const pfd = new FormData();
+      pfd.append("file", file);
+      const pres = await fetch("/api/system/restore/preview", { method: "POST", body: pfd });
+      const preview = await pres.json();
+      if (!pres.ok) throw new Error(preview.detail);
+
+      const created = preview.created ?? "unbekannt";
+      const proto = preview.vps?.active_protocol ?? "—";
+      const pfCount = (preview.vps?.port_forwardings ?? []).length;
+      const quotas = Object.keys(preview.vps?.link_quotas ?? {}).length;
+      const ok = confirm(
+        `Backup vom ${created}\n\n` +
+        `Protokoll: ${proto}\n` +
+        `Port-Weiterleitungen: ${pfCount}\n` +
+        `Datenlimits: ${quotas}\n\n` +
+        `Jetzt wiederherstellen? Bestehende Einstellungen werden überschrieben.`,
+      );
+      if (!ok) {
+        setMsg("Wiederherstellung abgebrochen.");
+        return;
+      }
+
+      const pw = prompt("Passwort des Backups:");
+      if (!pw) {
+        setMsg("Wiederherstellung abgebrochen.");
+        return;
+      }
       const fd = new FormData();
       fd.append("file", file);
       fd.append("password", pw);

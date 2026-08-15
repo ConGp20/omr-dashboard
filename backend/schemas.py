@@ -543,3 +543,9 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class AuthStatus(BaseModel):
+    auth_required: bool
+    demo: bool = False
+    username: str = "admin"
