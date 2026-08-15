@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import smtplib
+import time
 from email.message import EmailMessage
 from typing import Any
 
@@ -38,6 +39,7 @@ _BOOL_FIELDS = ("telegram_enabled", "webhook_enabled", "email_enabled", "smtp_tl
 
 _DEFAULTS: dict[str, Any] = {
     "min_severity": "warn",
+    "cooldown_minutes": 10,
     "telegram_enabled": False,
     "telegram_token": "",
     "telegram_chat_id": "",
@@ -91,7 +93,7 @@ def save_config(data_dir: str, updates: dict[str, Any]) -> dict[str, Any]:
     for k, v in updates.items():
         if k not in _DEFAULTS or v is None:
             continue
-        if k in _BOOL_FIELDS or k in ("min_severity", "smtp_port"):
+        if k in _BOOL_FIELDS or k in ("min_severity", "smtp_port", "cooldown_minutes"):
             cfg[k] = v
         elif isinstance(v, str) and v == "":
             continue  # keep existing (esp. secrets)
@@ -112,6 +114,7 @@ def public_config(cfg: dict[str, Any]) -> AlertConfigPublic:
     """Project the stored config to the UI shape, masking secrets."""
     return AlertConfigPublic(
         min_severity=cfg.get("min_severity", "warn"),
+        cooldown_minutes=int(cfg.get("cooldown_minutes") or 0),
         telegram_enabled=bool(cfg.get("telegram_enabled")),
         telegram_chat_id=cfg.get("telegram_chat_id") or None,
         telegram_token_set=bool(cfg.get("telegram_token")),
@@ -126,6 +129,40 @@ def public_config(cfg: dict[str, Any]) -> AlertConfigPublic:
         email_from=cfg.get("email_from") or None,
         email_to=cfg.get("email_to") or None,
     )
+
+
+# Last delivery time per event key, for flapping suppression. Process-local on
+# purpose: a restart should let a still-broken link alert once more.
+_last_sent: dict[str, float] = {}
+
+
+def event_key(event: Event) -> str:
+    """Identity of an event for throttling: same type, same subject."""
+    return f"{event.type}|{event.detail}"
+
+
+def should_send(event: Event, cooldown_minutes: float, now: float) -> bool:
+    """Whether ``event`` may be delivered, given the per-key cooldown.
+
+    A WAN that flaps every few seconds would otherwise emit one message per
+    transition. The first occurrence always goes out; repeats of the *same*
+    event are suppressed until the cooldown expires. Different events (a second
+    link failing, or the recovery notice) are unaffected, so suppression never
+    hides new information.
+    """
+    if cooldown_minutes <= 0:
+        return True
+    key = event_key(event)
+    last = _last_sent.get(key)
+    if last is not None and now - last < cooldown_minutes * 60:
+        return False
+    _last_sent[key] = now
+    return True
+
+
+def reset_throttle() -> None:
+    """Clear throttling state (used by tests and after a config change)."""
+    _last_sent.clear()
 
 
 def _enabled_channels(cfg: dict[str, Any]) -> list[str]:
@@ -152,6 +189,9 @@ async def dispatch(event: Event) -> None:
             return
         channels = _enabled_channels(cfg)
         if not channels:
+            return
+        if not should_send(event, float(cfg.get("cooldown_minutes") or 0), time.time()):
+            _log.debug("alert suppressed by cooldown: %s", event_key(event))
             return
         text = f"[OMR] {event.severity.upper()}: {event.detail}"
         if settings.demo:

@@ -55,6 +55,7 @@ class LinkStatus(BaseModel):
     enabled: bool = True
     priority: int = 0
     ip: Optional[str] = None
+    device: Optional[str] = None   # L3 device name, used to read byte counters
     rx_bps: float = 0.0
     tx_bps: float = 0.0
     latency_ms: Optional[float] = None
@@ -357,6 +358,9 @@ class AlertConfigUpdate(BaseModel):
     the stored one.
     """
     min_severity: Optional[Literal["warn", "error"]] = None
+    # 0 disables throttling; otherwise the same event is sent at most once per
+    # this many minutes (flapping protection).
+    cooldown_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
     telegram_enabled: Optional[bool] = None
     telegram_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None
@@ -375,6 +379,7 @@ class AlertConfigUpdate(BaseModel):
 class AlertConfigPublic(BaseModel):
     """Alert config as returned to the UI — secrets masked to booleans."""
     min_severity: str = "warn"
+    cooldown_minutes: int = 10
     telegram_enabled: bool = False
     telegram_chat_id: Optional[str] = None
     telegram_token_set: bool = False

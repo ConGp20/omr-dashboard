@@ -90,16 +90,31 @@ export default function AlertsPage() {
       <div className="space-y-4">
         <Card>
           <CardHeader><CardTitle>Auslösung</CardTitle></CardHeader>
-          <CardContent>
-            <Label>Ab welcher Schwere benachrichtigen</Label>
-            <Select
-              value={String(v("min_severity", data.min_severity))}
-              onChange={(e) => set("min_severity", e.target.value)}
-              className="mt-1 max-w-xs"
-            >
-              <option value="warn">Warnung & Fehler (empfohlen)</option>
-              <option value="error">Nur Fehler</option>
-            </Select>
+          <CardContent className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <div>
+              <Label>Ab welcher Schwere benachrichtigen</Label>
+              <Select
+                value={String(v("min_severity", data.min_severity))}
+                onChange={(e) => set("min_severity", e.target.value)}
+                className="mt-1"
+              >
+                <option value="warn">Warnung &amp; Fehler (empfohlen)</option>
+                <option value="error">Nur Fehler</option>
+              </Select>
+            </div>
+            <div>
+              <Label>Wiederholsperre (Minuten)</Label>
+              <Input
+                type="number" min={0} max={1440} className="mt-1"
+                value={Number(v("cooldown_minutes", data.cooldown_minutes))}
+                onChange={(e) => set("cooldown_minutes", Number(e.target.value))}
+              />
+              <p className="mt-1 text-xs text-muted">
+                Dieselbe Meldung wird höchstens einmal pro Zeitfenster gesendet —
+                schützt vor Nachrichtenfluten bei einer flatternden Leitung.
+                0 = keine Sperre.
+              </p>
+            </div>
           </CardContent>
         </Card>
 

@@ -242,6 +242,7 @@ export interface UsageResponse {
 
 export interface AlertConfigPublic {
   min_severity: "warn" | "error";
+  cooldown_minutes: number;
   telegram_enabled: boolean;
   telegram_chat_id?: string | null;
   telegram_token_set: boolean;

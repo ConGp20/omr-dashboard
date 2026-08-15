@@ -10,8 +10,9 @@ from fastapi.responses import Response
 
 from auth import require_user
 from config import get_settings
+from deps import get_store
 from schemas import ComponentVersion, PortForward, VersionsResponse
-from services import backup_service
+from services import alerts_service, backup_service
 from services.omr_proxy import OmrProxy
 from services.router_proxy import RouterProxy
 from services.shorewall_service import ShorewallService
@@ -87,6 +88,10 @@ async def create_backup(password: str = Form(...), _: str = Depends(require_user
     if not password:
         raise HTTPException(status_code=400, detail="Passwort erforderlich")
     vps_config, router_config, secrets = _collect_config()
+    # Data caps are plain settings; the alert config carries bot tokens and SMTP
+    # passwords, so it rides in the password-encrypted section instead.
+    vps_config["link_quotas"] = await get_store().quotas()
+    secrets["alerts"] = alerts_service.load_config(get_settings().data_dir)
     blob = backup_service.create_backup(
         password=password, vps_config=vps_config,
         router_config=router_config, secrets=secrets)
@@ -119,4 +124,18 @@ async def restore(file: UploadFile, password: str = Form(...), _: str = Depends(
     for pf in data["vps"].get("port_forwardings", []):
         sw.add_forward(PortForward(**pf))
         applied.append(f"Port-Weiterleitung {pf.get('src_port')}")
+
+    quotas = data["vps"].get("link_quotas") or {}
+    for link_id, q in quotas.items():
+        if isinstance(q, dict):
+            await get_store().set_quota(link_id, q.get("cap_gb"), int(q.get("warn_pct") or 80))
+    if quotas:
+        applied.append(f"Datenlimits ({len(quotas)})")
+
+    alerts_cfg = data["secrets"].get("alerts")
+    if isinstance(alerts_cfg, dict) and alerts_cfg:
+        alerts_service.save_config(get_settings().data_dir, alerts_cfg)
+        alerts_service.reset_throttle()
+        applied.append("Alarm-Konfiguration")
+
     return {"success": True, "created": data.get("created"), "applied": applied}

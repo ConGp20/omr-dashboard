@@ -48,3 +48,37 @@ def test_backup_endpoint_roundtrip(client):
     files = {"file": ("c.omr-backup.json.gz", io.BytesIO(rb.content), "application/gzip")}
     restored = client.post("/system/restore", files=files, data={"password": "secret123"}).json()
     assert restored["success"] is True
+
+
+def test_backup_carries_quotas_and_alert_config(client):
+    client.put("/dashboard/usage/wanB/quota", json={"cap_gb": 42, "warn_pct": 70})
+    client.put("/alerts/config", json={
+        "telegram_enabled": True, "telegram_token": "tok-in-backup",
+        "telegram_chat_id": "555", "cooldown_minutes": 25})
+
+    rb = client.post("/system/backup", data={"password": "pw"})
+    assert rb.status_code == 200
+
+    # Quotas are plain settings; the alert secrets ride in the encrypted part.
+    preview = backup_service.preview_backup(blob=rb.content)
+    assert preview["vps"]["link_quotas"]["wanB"]["cap_gb"] == 42
+    assert "alerts" not in preview["vps"]
+    data = backup_service.read_backup(password="pw", blob=rb.content)
+    assert data["secrets"]["alerts"]["telegram_token"] == "tok-in-backup"
+
+    # Wipe both, then restore and confirm they come back.
+    client.put("/dashboard/usage/wanB/quota", json={"cap_gb": 0})
+    client.put("/alerts/config", json={"telegram_enabled": False, "cooldown_minutes": 1})
+
+    files = {"file": ("c.gz", io.BytesIO(rb.content), "application/gzip")}
+    restored = client.post("/system/restore", files=files, data={"password": "pw"}).json()
+    assert restored["success"] is True
+    assert any("Datenlimit" in a for a in restored["applied"])
+    assert "Alarm-Konfiguration" in restored["applied"]
+
+    usage = {l["link_id"]: l for l in client.get("/dashboard/usage").json()["links"]}
+    assert usage["wanB"]["cap_gb"] == 42
+    assert usage["wanB"]["warn_pct"] == 70
+    cfg = client.get("/alerts/config").json()
+    assert cfg["telegram_enabled"] is True
+    assert cfg["cooldown_minutes"] == 25

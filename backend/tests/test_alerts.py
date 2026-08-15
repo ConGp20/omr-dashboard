@@ -51,6 +51,40 @@ def test_test_endpoint_demo_reports_sent(client):
     assert results["webhook"].startswith("sent")
 
 
+def test_cooldown_suppresses_repeat_of_same_event():
+    alerts_service.reset_throttle()
+    ev = Event(ts=0, type="link_down", detail="LTE ist ausgefallen", severity="warn")
+    assert alerts_service.should_send(ev, 10, now=1000.0) is True
+    # Same event flapping seconds later -> suppressed.
+    assert alerts_service.should_send(ev, 10, now=1030.0) is False
+    # ... until the cooldown expires.
+    assert alerts_service.should_send(ev, 10, now=1000.0 + 601) is True
+
+
+def test_cooldown_never_hides_a_different_event():
+    alerts_service.reset_throttle()
+    down = Event(ts=0, type="link_down", detail="LTE ist ausgefallen", severity="warn")
+    other = Event(ts=0, type="link_down", detail="Fiber ist ausgefallen", severity="warn")
+    recovery = Event(ts=0, type="link_up", detail="LTE ist wieder verbunden", severity="info")
+    assert alerts_service.should_send(down, 10, now=1000.0) is True
+    # A second link failing, and the recovery notice, are new information.
+    assert alerts_service.should_send(other, 10, now=1001.0) is True
+    assert alerts_service.should_send(recovery, 10, now=1002.0) is True
+
+
+def test_cooldown_zero_disables_throttling():
+    alerts_service.reset_throttle()
+    ev = Event(ts=0, type="link_down", detail="x", severity="warn")
+    assert alerts_service.should_send(ev, 0, now=1000.0) is True
+    assert alerts_service.should_send(ev, 0, now=1000.1) is True
+
+
+def test_cooldown_roundtrips_through_config(client):
+    r = client.put("/alerts/config", json={"cooldown_minutes": 30}).json()
+    assert r["cooldown_minutes"] == 30
+    assert client.get("/alerts/config").json()["cooldown_minutes"] == 30
+
+
 def test_dispatch_is_safe_in_demo(client):
     client.put("/alerts/config", json={
         "webhook_enabled": True, "webhook_url": "https://example.com/hook"})

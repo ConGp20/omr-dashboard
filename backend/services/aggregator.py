@@ -17,6 +17,7 @@ from typing import Optional
 
 from config import get_settings
 from schemas import (
+    BondState,
     ConfigOwner,
     DashboardStatus,
     Event,
@@ -29,6 +30,7 @@ from schemas import (
 )
 from services.metrics_store import MetricsStore, current_month
 from services.omr_proxy import OmrProxy
+from services.usage_collector import UsageCollector
 from services.router_proxy import RouterProxy
 from services.shorewall_service import ShorewallService
 
@@ -46,6 +48,8 @@ class Aggregator:
         # (month, link_id, level) tuples already alerted on, so a crossed
         # data-quota threshold fires its event only once per month.
         self._usage_alerted: set[tuple[str, str, str]] = set()
+        self.usage_collector = UsageCollector()
+        self._prev_bond_state: Optional[BondState] = None
 
     # --- lifecycle ---------------------------------------------------------
     async def start(self) -> None:
@@ -115,7 +119,7 @@ class Aggregator:
                 LinkStatus(
                     id=w.id, label=w.label or w.id, type=w.detected_type,
                     state=LinkState.up if w.up else LinkState.down,
-                    enabled=w.enabled, ip=w.ip,
+                    enabled=w.enabled, ip=w.ip, device=w.interface or None,
                 )
                 for w in wans
             ]
@@ -135,6 +139,7 @@ class Aggregator:
         await alerts_service.dispatch(event)
 
     async def _detect_events(self, status: DashboardStatus) -> None:
+        await self._detect_bond_events(status)
         for link in status.links:
             prev = self._prev_link_state.get(link.id)
             if prev is not None and prev != link.state:
@@ -152,19 +157,41 @@ class Aggregator:
                         detail=f"{link.label} ist beeinträchtigt", severity="warn"))
             self._prev_link_state[link.id] = link.state
 
-    async def _accumulate_usage(self, status: DashboardStatus) -> None:
-        """Integrate per-link throughput into the month's volume counters and
-        fire one-shot events when a configured data cap threshold is crossed."""
-        interval = self.settings.poll_interval_seconds
-        month = current_month()
-        rows = [
-            (l.id, max(0.0, l.rx_bps) * interval / 8.0, max(0.0, l.tx_bps) * interval / 8.0)
-            for l in status.links
-            if l.enabled and l.state != LinkState.disabled
-        ]
-        if not rows:
+    async def _detect_bond_events(self, status: DashboardStatus) -> None:
+        """Emit an event when the overall bond changes state.
+
+        The per-link events below say which line broke; this one says what it
+        meant for the connection as a whole — going offline is the single most
+        alert-worthy thing that can happen, so it gets ``error`` severity.
+        """
+        prev, self._prev_bond_state = self._prev_bond_state, status.state
+        if prev is None or prev == status.state:
             return
-        await self.store.add_usage(month, rows)
+        detail, severity = {
+            BondState.offline: ("Verbindung offline — kein Tunnel aktiv", "error"),
+            BondState.degraded: ("Verbindung beeinträchtigt — nicht alle Leitungen aktiv", "warn"),
+            BondState.bonded: ("Verbindung wieder vollständig gebündelt", "info"),
+        }[status.state]
+        await self._emit(Event(ts=int(time.time()), type=f"bond_{status.state.value}",
+                               detail=detail, severity=severity))
+
+    async def _accumulate_usage(self, status: DashboardStatus) -> None:
+        """Book this tick's traffic into the month's volume counters and fire
+        one-shot events when a configured data cap threshold is crossed.
+
+        Uses the router's cumulative interface counters where available (exact)
+        and falls back to integrating throughput per link — see
+        ``services/usage_collector.py``.
+        """
+        try:
+            counters = await RouterProxy().device_stats()
+        except Exception:  # noqa: BLE001 — accounting must not break the loop
+            counters = {}
+        rows = self.usage_collector.sample(
+            status.links, counters, self.settings.poll_interval_seconds)
+        month = current_month()
+        if rows:
+            await self.store.add_usage(month, rows)
         await self._check_quota_alerts(status, month)
 
     async def _check_quota_alerts(self, status: DashboardStatus, month: str) -> None:

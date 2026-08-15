@@ -15,6 +15,11 @@ service, and aggregates everything (VPS + router) into one clean UI:
   through the VPS), exit-VPN, QoS profiles, domain routing, DNS, diagnostics.
 - **Config-ownership map** — see exactly which setting lives on the router,
   which on the VPS, and what is auto-synced.
+- **Monthly data tracking** — per-WAN volume read from the router's interface
+  counters, with a monthly cap and warning threshold for ISP limits.
+- **Alerts** — Telegram, webhook or e-mail when a line drops, the bond goes
+  offline, or a data cap is reached. Repeat-suppression keeps a flapping link
+  from flooding your inbox.
 - **Encrypted backup/restore** — bundle the whole config into one file and bring
   it back in ~2 minutes. Perfect for occasional/event-based bonding.
 
@@ -119,7 +124,7 @@ reach it via an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 root@<vps>`.
 
 ```bash
 cd backend && . .venv/bin/activate
-pytest                      # 30 tests, all green in demo mode
+pytest                      # 74 tests, all green in demo mode
 
 cd ../frontend && npm run build    # type-checks + builds all routes
 ```

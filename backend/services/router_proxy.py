@@ -13,6 +13,7 @@ import httpx
 
 from config import get_settings
 from schemas import LinkType, WizardWan
+from services import demo_data
 
 
 def infer_type(interface: str, name: str = "") -> LinkType:
@@ -149,6 +150,29 @@ class RouterProxy:
                 )
             )
         return wans
+
+    async def device_stats(self) -> dict[str, tuple[float, float]]:
+        """Cumulative ``(rx_bytes, tx_bytes)`` per network device.
+
+        These are the interface counters the kernel maintains, so integrating
+        them gives exact volume accounting — unlike sampling throughput, which
+        misses everything between two polls. Returns ``{}`` when the router
+        exposes no usable statistics, letting callers fall back.
+        """
+        if self.settings.demo:
+            return demo_data.device_counters()
+        dump = await self._call("network.device", "status") or {}
+        out: dict[str, tuple[float, float]] = {}
+        for device, info in dump.items():
+            if not isinstance(info, dict):
+                continue
+            stats = info.get("statistics")
+            if not isinstance(stats, dict):
+                continue
+            rx, tx = stats.get("rx_bytes"), stats.get("tx_bytes")
+            if isinstance(rx, (int, float)) and isinstance(tx, (int, float)):
+                out[device] = (float(rx), float(tx))
+        return out
 
     async def uci_set(self, config: str, section: str, values: dict) -> bool:
         if self.settings.demo:

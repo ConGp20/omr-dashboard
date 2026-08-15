@@ -360,6 +360,54 @@ verschlüsseltes `.omr-backup.json.gz` erzeugen (Passwort wählen — die Tunnel
 werden AES-256-GCM verschlüsselt, nie im Klartext). Wiederherstellen über
 **System → Restore** oder direkt im Wizard (Schritt 1 → „Backup wiederherstellen").
 
+Das Backup enthält auch die **Datenlimits** pro WAN und die **Alarm-Konfiguration**
+(Bot-Token und SMTP-Passwort liegen im verschlüsselten Teil). Nach einer
+Wiederherstellung sind beide sofort wieder aktiv.
+
+---
+
+## Datenverbrauch überwachen (ISP-Limits)
+
+Unter **Datenverbrauch** siehst Du pro WAN das Volumen des laufenden Monats.
+
+- Die Werte kommen aus den **Interface-Zählern des Routers** — also aus dem
+  Kernel, nicht aus Stichproben. Dadurch geht auch zwischen zwei Messungen
+  nichts verloren. Kann eine Leitung keine Zähler liefern, rechnet das Dashboard
+  ersatzweise aus der gemessenen Rate hoch.
+- Ein Router-Neustart setzt die Zähler zurück; das wird erkannt und **nicht**
+  als riesiger Verbrauch verbucht.
+- Pro Leitung lassen sich **Monatslimit (GB)** und **Warnschwelle (%)** setzen.
+  Beim Überschreiten entsteht ein Ereignis (und, falls eingerichtet, ein Alarm) —
+  einmalig pro Monat und Schwelle, nicht bei jeder Messung.
+- Der Monat wird in UTC gezählt. Die Verbrauchshistorie bleibt ca. 13 Monate
+  erhalten, deutlich länger als die feingranularen Messwerte.
+
+## Alarme einrichten
+
+Unter **Alarme** legst Du fest, worüber Du informiert wirst:
+
+| Kanal | Was Du brauchst |
+|---|---|
+| **Telegram** | Bot-Token (von `@BotFather`) und Chat-ID |
+| **Webhook** | Eine URL — bekommt das Ereignis als JSON per POST |
+| **E-Mail** | SMTP-Server, Port, Zugangsdaten, Absender und Empfänger |
+
+Ausgelöst wird bei WAN-Ausfall, Wiederkehr, beeinträchtigter Leitung, Wechsel
+des Gesamtzustands (z. B. **offline** — der wichtigste Fall) und bei erreichten
+Datenlimits.
+
+Zwei Einstellungen steuern die Menge:
+
+- **Schwere:** „Warnung & Fehler" (Standard) oder „nur Fehler".
+- **Wiederholsperre:** Dieselbe Meldung geht höchstens einmal pro Zeitfenster
+  raus (Standard 10 Minuten). Das verhindert Nachrichtenfluten bei einer
+  flatternden Leitung — **neue** Meldungen (eine zweite Leitung fällt aus, oder
+  die Entwarnung) kommen davon unabhängig sofort durch. `0` schaltet die Sperre ab.
+
+Mit **Test senden** prüfst Du jeden aktiven Kanal einzeln; das Ergebnis wird pro
+Kanal angezeigt. Die Zugangsdaten werden verschlüsselt auf dem VPS abgelegt
+(`alerts.enc`) und nie an den Browser zurückgegeben.
+
 ---
 
 ## Eigene Firewall hinter dem OMR-Router einrichten
