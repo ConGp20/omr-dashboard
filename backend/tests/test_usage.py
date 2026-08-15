@@ -47,6 +47,32 @@ def test_quota_endpoint_flags_warn_and_cap(client):
     assert any(l["link_id"] == "wanT" for l in listing["links"])
 
 
+def test_month_progress_is_a_sane_fraction():
+    import calendar
+    import time as _time
+    from services.metrics_store import month_progress
+
+    # Mid-month reference point: 2099-06-16 12:00 UTC -> 15.5/30 days.
+    ts = calendar.timegm(_time.struct_time((2099, 6, 16, 12, 0, 0, 0, 0, 0)))
+    fraction, day, days = month_progress(ts)
+    assert (day, days) == (16, 30)
+    assert abs(fraction - 15.5 / 30) < 0.001
+
+    # First instant of a month must not divide by zero.
+    ts = calendar.timegm(_time.struct_time((2099, 6, 1, 0, 0, 0, 0, 0, 0)))
+    fraction, day, days = month_progress(ts)
+    assert fraction > 0 and day == 1
+
+
+def test_usage_endpoint_projects_month_end(client):
+    body = client.get("/dashboard/usage").json()
+    assert 1 <= body["day_of_month"] <= 31
+    assert body["days_in_month"] in (28, 29, 30, 31)
+    for link in body["links"]:
+        # Projection is never below what is already used.
+        assert link["projected_bytes"] >= link["total_bytes"] - 1
+
+
 def test_quota_can_be_cleared(client):
     client.put("/dashboard/usage/wanC/quota", json={"cap_gb": 10})
     cleared = client.put("/dashboard/usage/wanC/quota", json={"cap_gb": 0}).json()

@@ -15,11 +15,29 @@ function monthLabel(month: string): string {
   return `${names[Number(m) - 1] ?? m} ${y}`;
 }
 
-function UsageBar({ pct, over }: { pct: number; over: "none" | "warn" | "cap" }) {
+/**
+ * Usage bar with a projection marker.
+ *
+ * The filled part is what has actually been used; the tick shows where the
+ * month is heading at the current rate. Seeing the forecast cross the end of
+ * the bar is the moment to act — long before the cap is actually hit.
+ */
+function UsageBar({ pct, projectedPct, over }: {
+  pct: number; projectedPct?: number | null; over: "none" | "warn" | "cap";
+}) {
   const tone = over === "cap" ? "bg-bad" : over === "warn" ? "bg-warn" : "bg-primary";
+  const marker = projectedPct != null ? Math.min(100, projectedPct) : null;
   return (
-    <div className="h-2 w-full overflow-hidden rounded-full bg-surface-2">
-      <div className={`h-full rounded-full ${tone} transition-all`} style={{ width: `${Math.min(100, pct)}%` }} />
+    <div className="relative h-2 w-full overflow-hidden rounded-full bg-surface-2">
+      <div className={`h-full rounded-full ${tone} transition-all`}
+           style={{ width: `${Math.min(100, pct)}%` }} />
+      {marker != null && marker > pct && (
+        <span
+          className="absolute top-0 h-2 w-0.5 bg-fg/60"
+          style={{ left: `calc(${marker}% - 1px)` }}
+          title={`Hochrechnung Monatsende: ${projectedPct?.toFixed(0)} %`}
+        />
+      )}
     </div>
   );
 }
@@ -63,11 +81,19 @@ function LinkUsageCard({ link, onSaved }: { link: LinkUsage; onSaved: () => void
             {link.cap_gb ? `von ${link.cap_gb} GB${link.used_pct != null ? ` · ${link.used_pct.toFixed(0)}%` : ""}` : "kein Limit gesetzt"}
           </span>
         </div>
-        {link.cap_gb ? <UsageBar pct={pct} over={over} /> : null}
-        <div className="flex gap-4 text-xs text-muted">
+        {link.cap_gb ? <UsageBar pct={pct} projectedPct={link.projected_pct} over={over} /> : null}
+        <div className="flex flex-wrap gap-4 text-xs text-muted">
           <span>↓ {formatBytes(link.rx_bytes)}</span>
           <span>↑ {formatBytes(link.tx_bytes)}</span>
         </div>
+        {link.cap_gb ? (
+          <p className={`text-xs ${link.projected_over_cap ? "text-warn" : "text-muted"}`}>
+            {link.projected_over_cap ? "⚠ " : ""}
+            Hochrechnung Monatsende: {formatBytes(link.projected_bytes)}
+            {link.projected_pct != null && ` (${link.projected_pct.toFixed(0)} % des Limits)`}
+            {link.projected_over_cap && " — beim aktuellen Tempo wird das Limit überschritten."}
+          </p>
+        ) : null}
         <div className="grid grid-cols-2 gap-2 border-t border-border pt-3">
           <div>
             <Label>Monatslimit (GB)</Label>
@@ -98,7 +124,9 @@ export default function UsagePage() {
         description="Monatliches Volumen pro WAN — mit Warnschwelle für ISP-Limits."
         action={data && (
           <div className="text-right">
-            <div className="text-xs text-muted">{monthLabel(data.month)}</div>
+            <div className="text-xs text-muted">
+              {monthLabel(data.month)} · Tag {data.day_of_month} von {data.days_in_month}
+            </div>
             <div className="flex items-center gap-1.5 text-sm font-semibold text-fg">
               <Gauge size={15} /> {formatBytes(data.total_bytes)} gesamt
             </div>

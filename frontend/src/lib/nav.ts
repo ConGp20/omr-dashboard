@@ -12,6 +12,7 @@ import {
   Cable,
   Bell,
   Gauge,
+  HeartPulse,
   type LucideIcon,
 } from "lucide-react";
 
@@ -35,6 +36,7 @@ export const NAV: NavItem[] = [
   { href: "/usage", label: "Datenverbrauch", icon: Gauge },
   { href: "/alerts", label: "Alarme", icon: Bell },
   { href: "/diagnostics", label: "Diagnose", icon: Stethoscope },
+  { href: "/health", label: "Systemcheck", icon: HeartPulse },
   { href: "/config-map", label: "Konfig-Karte", icon: Map, tourId: "nav-config-map" },
   { href: "/system", label: "System", icon: Settings },
 ];

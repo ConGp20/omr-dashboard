@@ -22,6 +22,7 @@ from routers import (
     diagnostics,
     dns,
     firewall,
+    health,
     links,
     metrics,
     protocols,
@@ -92,9 +93,12 @@ def create_app() -> FastAPI:
     app.include_router(wizard.router)
     app.include_router(settings_router.router)
     app.include_router(alerts.router)
+    app.include_router(health.router)
 
+    # Named distinctly from the `health` router module imported above, which it
+    # would otherwise shadow inside this function's scope.
     @app.get("/health", tags=["meta"])
-    async def health() -> dict:
+    async def health_probe() -> dict:
         return {"status": "ok", "demo": settings.demo, "version": "1.0.0"}
 
     return app

@@ -14,6 +14,7 @@ from schemas import (
     ProtocolTuning,
     SchedulerUpdate,
 )
+from services import advisor
 from services.omr_proxy import OmrProxy
 from services.router_proxy import RouterProxy
 
@@ -31,10 +32,10 @@ SCHEDULERS = {
 @router.get("", response_model=list[ProtocolInfo])
 async def list_protocols(_: str = Depends(require_user)) -> list[ProtocolInfo]:
     protocols = await OmrProxy().protocols()
-    # Recommendation: pick based on number of active links.
+    # Recommend from the actual mix of link types (shared with the advisor, so
+    # the protocols page and the system check never contradict each other).
     status = await get_aggregator().status()
-    n = status.total_links or len(status.links)
-    rec = "glorytun_tcp" if n <= 1 else "shadowsocks"
+    rec, _reason = advisor.recommend_protocol(status.links)
     for p in protocols:
         p.recommended = (p.id == rec)
     return protocols

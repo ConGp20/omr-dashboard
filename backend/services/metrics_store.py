@@ -7,6 +7,7 @@ DB access runs in a thread executor so it never blocks the event loop.
 from __future__ import annotations
 
 import asyncio
+import calendar
 import contextlib
 import os
 import sqlite3
@@ -60,6 +61,22 @@ CREATE TABLE IF NOT EXISTS link_quota (
 def current_month() -> str:
     """The current accounting month as ``YYYY-MM`` in UTC."""
     return time.strftime("%Y-%m", time.gmtime())
+
+
+def month_progress(now: Optional[float] = None) -> tuple[float, int, int]:
+    """How far into the current (UTC) month we are.
+
+    Returns ``(fraction, day_of_month, days_in_month)`` where fraction is in
+    (0, 1]. Used to project month-end volume from what has been used so far.
+    """
+    now = time.time() if now is None else now
+    tm = time.gmtime(now)
+    days_in_month = calendar.monthrange(tm.tm_year, tm.tm_mon)[1]
+    elapsed_days = (tm.tm_mday - 1) + (tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec) / 86400
+    # Guard the very first instant of a month against a divide-by-zero and an
+    # absurd projection from a few seconds of traffic.
+    fraction = max(elapsed_days / days_in_month, 1e-6)
+    return fraction, tm.tm_mday, days_in_month
 
 _PERIOD_SECONDS = {
     "1h": 3600,

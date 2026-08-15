@@ -16,7 +16,12 @@ service, and aggregates everything (VPS + router) into one clean UI:
 - **Config-ownership map** — see exactly which setting lives on the router,
   which on the VPS, and what is auto-synced.
 - **Monthly data tracking** — per-WAN volume read from the router's interface
-  counters, with a monthly cap and warning threshold for ISP limits.
+  counters, with a monthly cap, warning threshold, and a month-end projection
+  that flags an overrun before it happens.
+- **System check** — non-blocking advice: misconfiguration hints (public bind
+  address, placeholder session secret, missing caps on metered links), plus
+  recommendations with the concrete setting to change and a link straight to it.
+  Nothing it reports ever blocks an action.
 - **Alerts** — Telegram, webhook or e-mail when a line drops, the bond goes
   offline, or a data cap is reached. Repeat-suppression keeps a flapping link
   from flooding your inbox.
@@ -124,7 +129,7 @@ reach it via an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 root@<vps>`.
 
 ```bash
 cd backend && . .venv/bin/activate
-pytest                      # 74 tests, all green in demo mode
+pytest                      # 110 tests, all green in demo mode
 
 cd ../frontend && npm run build    # type-checks + builds all routes
 ```

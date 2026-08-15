@@ -232,12 +232,17 @@ export interface LinkUsage {
   used_pct?: number | null;
   over_warn: boolean;
   over_cap: boolean;
+  projected_bytes: number;
+  projected_pct?: number | null;
+  projected_over_cap: boolean;
 }
 
 export interface UsageResponse {
   month: string;
   total_bytes: number;
   links: LinkUsage[];
+  day_of_month: number;
+  days_in_month: number;
 }
 
 export interface AlertConfigPublic {
@@ -266,6 +271,24 @@ export interface AuthStatus {
   auth_required: boolean;
   demo: boolean;
   username: string;
+}
+
+export interface Finding {
+  id: string;
+  severity: "error" | "warn" | "info";
+  title: string;
+  detail: string;
+  action: string;
+  page?: string | null;
+  category: string;
+}
+
+export interface HealthReport {
+  findings: Finding[];
+  errors: number;
+  warnings: number;
+  infos: number;
+  checked: number;
 }
 
 export interface RoutingOverview {

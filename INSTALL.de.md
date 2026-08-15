@@ -366,6 +366,44 @@ Wiederherstellung sind beide sofort wieder aktiv.
 
 ---
 
+## Anmeldung
+
+Sobald ein Dashboard-Passwort gesetzt ist (`DASHBOARD_PASS` in der `.env` — das
+Install-Script setzt es automatisch), erscheint beim Aufruf eine Anmeldemaske.
+
+- Benutzer ist standardmäßig `admin`, das Passwort steht in der `.env`.
+- Ist **kein** Passwort gesetzt (frische Installation) oder läuft das Dashboard
+  im Demo-Modus, entfällt die Anmeldung — es gäbe nichts zu prüfen.
+- Das Sitzungs-Token liegt in einem httpOnly-Cookie und ist für JavaScript im
+  Browser nicht lesbar. Der Server hängt es intern an jede Anfrage.
+- Nach fünf Fehlversuchen ist die Anmeldung fünf Minuten gesperrt (pro
+  Absender-IP). Passwörter werden zeitkonstant verglichen.
+- Abmelden: unten in der Seitenleiste.
+
+Passwort ändern unter **System → Sicherheit**. Wenn Du dort auch das
+JWT-Secret änderst, werden alle offenen Sitzungen sofort abgemeldet.
+
+## Systemcheck: Hinweise und Empfehlungen
+
+Die Seite **Systemcheck** prüft die Konfiguration und meldet, was auffällt —
+**rein beratend**. Nichts davon blockiert eine Aktion; Du kannst jeden Punkt
+ignorieren.
+
+Geprüft werden unter anderem:
+
+| Bereich | Beispiel |
+|---|---|
+| Sicherheit | JWT-Secret noch der Platzhalter, kein Dashboard-Passwort, `BIND_ADDR` öffentlich erreichbar |
+| Verbindung | Kein Tunnel aktiv, nur eine Leitung, Leitung mit hohem Paketverlust/Latenz |
+| Datenverbrauch | Mobilfunk-Leitung ohne Limit, Limit fast/ganz erreicht, Hochrechnung überschreitet das Limit |
+| Benachrichtigungen | Kein Kanal aktiv, Wiederholsperre abgeschaltet |
+| Leistung | Ein anderes Tunnel-Protokoll passt besser zum Leitungsmix |
+
+Jeder Befund nennt **was** auffällt, **warum** das zählt und **was zu tun ist** —
+mit Direktlink auf die passende Seite. Auf der Übersicht erscheint zusätzlich
+eine dezente Zeile mit dem wichtigsten offenen Punkt; gibt es nichts zu melden,
+ist sie unsichtbar.
+
 ## Datenverbrauch überwachen (ISP-Limits)
 
 Unter **Datenverbrauch** siehst Du pro WAN das Volumen des laufenden Monats.
@@ -381,6 +419,11 @@ Unter **Datenverbrauch** siehst Du pro WAN das Volumen des laufenden Monats.
   einmalig pro Monat und Schwelle, nicht bei jeder Messung.
 - Der Monat wird in UTC gezählt. Die Verbrauchshistorie bleibt ca. 13 Monate
   erhalten, deutlich länger als die feingranularen Messwerte.
+- Zusätzlich rechnet das Dashboard den Verbrauch aufs Monatsende hoch. Der
+  kleine Strich im Balken zeigt, wo Du bei gleichbleibendem Tempo landest —
+  so siehst Du eine Überschreitung, **bevor** sie eintritt. Die Hochrechnung
+  startet erst nach etwa 15 % des Monats, damit ein einzelner großer Download
+  am 2. keine Fehlprognose auslöst.
 
 ## Alarme einrichten
 

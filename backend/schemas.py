@@ -334,12 +334,19 @@ class LinkUsage(BaseModel):
     used_pct: Optional[float] = None    # total vs cap; None when no cap is set
     over_warn: bool = False
     over_cap: bool = False
+    # Linear projection to month end from the rate so far — lets the UI warn
+    # before a cap is actually hit rather than after.
+    projected_bytes: float = 0.0
+    projected_pct: Optional[float] = None
+    projected_over_cap: bool = False
 
 
 class UsageResponse(BaseModel):
     month: str                          # "YYYY-MM" (UTC)
     total_bytes: float = 0.0
     links: list[LinkUsage] = Field(default_factory=list)
+    day_of_month: int = 1
+    days_in_month: int = 30
 
 
 class QuotaUpdate(BaseModel):
@@ -549,3 +556,24 @@ class AuthStatus(BaseModel):
     auth_required: bool
     demo: bool = False
     username: str = "admin"
+
+
+# --------------------------------------------------------------------------- #
+# Configuration advisor (non-blocking hints and recommendations)
+# --------------------------------------------------------------------------- #
+class Finding(BaseModel):
+    id: str
+    severity: Literal["error", "warn", "info"]
+    title: str
+    detail: str                        # what is wrong and why it matters
+    action: str                        # what to do about it
+    page: Optional[str] = None         # deep link to where it is changed
+    category: str = "general"
+
+
+class HealthReport(BaseModel):
+    findings: list[Finding] = Field(default_factory=list)
+    errors: int = 0
+    warnings: int = 0
+    infos: int = 0
+    checked: int = 0
