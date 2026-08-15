@@ -55,6 +55,16 @@ CREATE TABLE IF NOT EXISTS link_quota (
     cap_gb REAL,                  -- monthly cap in GB; NULL = no limit
     warn_pct INTEGER NOT NULL DEFAULT 80
 );
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    ts INTEGER NOT NULL,
+    actor TEXT,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status INTEGER,
+    client TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
 """
 
 
@@ -204,7 +214,45 @@ class MetricsStore:
                 (link_id, cap_gb, warn_pct),
             )
 
+    async def add_audit(self, actor: str, method: str, path: str,
+                        status: int, client: str) -> None:
+        """Record one config-changing request.
+
+        Only the request line is stored — never bodies or query strings, which
+        would drag credentials into a table meant to be readable.
+        """
+        await asyncio.to_thread(self._add_audit, actor, method, path, status, client)
+
+    def _add_audit(self, actor: str, method: str, path: str,
+                   status: int, client: str) -> None:
+        with self._write() as conn:
+            if conn is None:
+                return
+            conn.execute(
+                "INSERT INTO audit_log (ts, actor, method, path, status, client)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (int(time.time()), actor, method, path, status, client),
+            )
+
     # --- reads -------------------------------------------------------------
+    async def audit(self, limit: int = 100) -> list[dict]:
+        rows = await asyncio.to_thread(self._audit, limit)
+        return [
+            {"ts": r[0], "actor": r[1], "method": r[2], "path": r[3],
+             "status": r[4], "client": r[5]}
+            for r in rows
+        ]
+
+    def _audit(self, limit: int) -> list[tuple]:
+        with self._read() as conn:
+            if conn is None:
+                return []
+            return conn.execute(
+                "SELECT ts, actor, method, path, status, client FROM audit_log"
+                " ORDER BY ts DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+
     async def usage(self, month: str) -> dict[str, tuple]:
         """Per-link accumulated ``(rx_bytes, tx_bytes)`` for ``month``."""
         rows = await asyncio.to_thread(self._usage, month)
@@ -300,6 +348,10 @@ class MetricsStore:
             conn.execute("DELETE FROM link_metrics WHERE ts < ?", (cutoff,))
             conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
             conn.execute("DELETE FROM monthly_usage WHERE month < ?", (usage_cutoff,))
+            # The audit trail outlives both — "who changed this" is worth
+            # keeping a year, and the rows are tiny.
+            conn.execute("DELETE FROM audit_log WHERE ts < ?",
+                         (int(time.time()) - 365 * 86400,))
 
     def close(self) -> None:
         """Close the connection, waiting for any in-flight query to finish.

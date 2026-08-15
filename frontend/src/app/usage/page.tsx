@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Gauge, Save } from "lucide-react";
+import { Download, Gauge, Save } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Label } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
@@ -123,12 +123,17 @@ export default function UsagePage() {
         title="Datenverbrauch"
         description="Monatliches Volumen pro WAN — mit Warnschwelle für ISP-Limits."
         action={data && (
-          <div className="text-right">
-            <div className="text-xs text-muted">
-              {monthLabel(data.month)} · Tag {data.day_of_month} von {data.days_in_month}
-            </div>
-            <div className="flex items-center gap-1.5 text-sm font-semibold text-fg">
-              <Gauge size={15} /> {formatBytes(data.total_bytes)} gesamt
+          <div className="flex items-center gap-3">
+            <a href="/api/dashboard/usage.csv" download>
+              <Button size="sm" variant="outline"><Download size={14} /> CSV</Button>
+            </a>
+            <div className="text-right">
+              <div className="text-xs text-muted">
+                {monthLabel(data.month)} · Tag {data.day_of_month} von {data.days_in_month}
+              </div>
+              <div className="flex items-center gap-1.5 text-sm font-semibold text-fg">
+                <Gauge size={15} /> {formatBytes(data.total_bytes)} gesamt
+              </div>
             </div>
           </div>
         )}

@@ -33,6 +33,7 @@ from routers import (
     vps,
     wizard,
 )
+from services import audit
 from services.aggregator import Aggregator
 from services.metrics_store import MetricsStore
 
@@ -69,6 +70,10 @@ def create_app() -> FastAPI:
         description="Aggregated control plane for OpenMPTCProuter",
         lifespan=lifespan,
     )
+
+    # Records every configuration change; see services/audit.py for why this is
+    # middleware rather than per-endpoint calls.
+    app.middleware("http")(audit.middleware)
 
     app.add_middleware(
         CORSMiddleware,

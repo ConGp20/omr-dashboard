@@ -1,7 +1,11 @@
 """Historical metrics, event log and monthly data-usage tracking."""
 from __future__ import annotations
 
+import csv
+import io
+
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
 
 from auth import require_user
 from deps import get_aggregator, get_store
@@ -63,6 +67,32 @@ async def usage(_: str = Depends(require_user)) -> UsageResponse:
                                  quotas.get(link_id, {}), progress))
     return UsageResponse(month=month, total_bytes=total, links=links,
                          day_of_month=day, days_in_month=days)
+
+
+@router.get("/usage.csv")
+async def usage_csv(_: str = Depends(require_user)) -> Response:
+    """Current month's per-link volume as CSV, for billing or a spreadsheet."""
+    report = await usage()
+    buf = io.StringIO()
+    writer = csv.writer(buf, delimiter=";")
+    writer.writerow(["month", "link_id", "label", "rx_bytes", "tx_bytes",
+                     "total_bytes", "total_gb", "cap_gb", "used_pct",
+                     "projected_gb"])
+    for link in report.links:
+        writer.writerow([
+            report.month, link.link_id, link.label,
+            int(link.rx_bytes), int(link.tx_bytes), int(link.total_bytes),
+            f"{link.total_bytes / 1e9:.3f}",
+            f"{link.cap_gb:g}" if link.cap_gb else "",
+            f"{link.used_pct:.1f}" if link.used_pct is not None else "",
+            f"{link.projected_bytes / 1e9:.3f}",
+        ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition":
+                 f'attachment; filename="omr-usage-{report.month}.csv"'},
+    )
 
 
 @router.put("/usage/{link_id}/quota", response_model=LinkUsage)

@@ -69,6 +69,13 @@ async def update(_: str = Depends(require_user)) -> dict:
     return {"success": False, "detail": "Update über VPS-Konsole ausführen: omr-update"}
 
 
+@router.get("/audit")
+async def audit_log(limit: int = 100, _: str = Depends(require_user)) -> dict:
+    """Recent configuration changes: who, what, when."""
+    limit = max(1, min(limit, 500))
+    return {"entries": await get_store().audit(limit=limit)}
+
+
 # --- backup / restore ----------------------------------------------------- #
 def _collect_config() -> tuple[dict, dict, dict]:
     """Gather VPS config, router config and secrets for a backup."""

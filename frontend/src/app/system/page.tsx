@@ -1,11 +1,11 @@
 "use client";
 import { useRef, useState } from "react";
-import { ArrowUpCircle, CheckCircle2, Download, Upload, Save, KeyRound, Wifi } from "lucide-react";
+import { ArrowUpCircle, CheckCircle2, Download, Upload, Save, KeyRound, Wifi, ScrollText } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { Card, CardHeader, CardTitle, CardContent, Button, Badge, Input, Label } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
-import type { ComponentVersion, ConnectionSettings, ConnectionTestResult, SecuritySettings } from "@/lib/types";
+import type { AuditEntry, ComponentVersion, ConnectionSettings, ConnectionTestResult, SecuritySettings } from "@/lib/types";
 
 function Versions() {
   const { data } = useApi<{ components: ComponentVersion[] }>("/system/versions");
@@ -302,6 +302,59 @@ function SecuritySettingsSection() {
   );
 }
 
+function AuditLog() {
+  const { data } = useApi<{ entries: AuditEntry[] }>("/system/audit?limit=50");
+  const entries = data?.entries ?? [];
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2"><ScrollText size={16} /> Änderungsprotokoll</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <p className="mb-2 text-xs text-muted">
+          Jede Konfigurationsänderung mit Zeitpunkt, Benutzer und Ergebnis.
+          Inhalte werden bewusst nicht mitgeschrieben — dort stünden sonst
+          Passwörter und Schlüssel.
+        </p>
+        {entries.length === 0 ? (
+          <p className="text-xs text-muted">Noch keine Änderungen aufgezeichnet.</p>
+        ) : (
+          <div className="max-h-72 overflow-y-auto">
+            <table className="w-full text-sm">
+              <thead className="sticky top-0 bg-surface">
+                <tr className="text-left text-xs text-muted">
+                  <th className="pb-2 font-medium">Zeitpunkt</th>
+                  <th className="pb-2 font-medium">Benutzer</th>
+                  <th className="pb-2 font-medium">Aktion</th>
+                  <th className="pb-2 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {entries.map((e, i) => (
+                  <tr key={`${e.ts}-${i}`} className="border-t border-border">
+                    <td className="py-1.5 text-xs text-muted">
+                      {new Date(e.ts * 1000).toLocaleString("de-DE")}
+                    </td>
+                    <td className="py-1.5 text-xs text-fg">{e.actor}</td>
+                    <td className="py-1.5 text-xs">
+                      <span className="text-muted">{e.method}</span>{" "}
+                      <span className="text-fg">{e.path}</span>
+                    </td>
+                    <td className="py-1.5">
+                      <Badge tone={e.status < 400 ? "good" : "bad"}>{e.status}</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SystemPage() {
   return (
     <div>
@@ -311,6 +364,7 @@ export default function SystemPage() {
         <SecuritySettingsSection />
         <Versions />
         <BackupRestore />
+        <AuditLog />
       </div>
     </div>
   );

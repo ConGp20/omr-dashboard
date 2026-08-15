@@ -291,6 +291,15 @@ export interface HealthReport {
   checked: number;
 }
 
+export interface AuditEntry {
+  ts: number;
+  actor: string;
+  method: string;
+  path: string;
+  status: number;
+  client: string;
+}
+
 export interface RoutingOverview {
   default_exit: string;
   exit_vpn_enabled: boolean;
