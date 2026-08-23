@@ -504,23 +504,28 @@ umgesetzte Erweiterung — Konzept und Aufwand dazu stehen in
 
 ## Bekannte Einschränkungen (ehrlich)
 
-- **Nur Demo-Modus end-to-end verifiziert.** Die Live-Pfade (omr-admin,
-  Router-ubus, Shorewall, WireGuard) sind korrekt verdrahtet, aber der erste
-  Lauf gegen echte Hardware ist der erste echte Integrationstest — begleite ihn
-  mit Logs.
+- **Noch kein Lauf gegen echte Hardware.** Inzwischen im Echtmodus getestet
+  (ohne Gerät möglich): Shorewall-Dateiverwaltung (Regeln + Weiterleitungen,
+  inkl. Roundtrip), Anmeldung mit gesetztem Passwort, Schlüssel-Extraktion aus
+  der omr-admin-Config, Backup/Restore, Verbrauchslogik. **Nicht** ohne Gerät
+  testbar und daher unverifiziert: echte ubus-Aufrufe an den Router (Wizard-
+  Schlüsselübertragung, Interface-Zähler), echte omr-admin-HTTP-Aufrufe,
+  echter Alarm-Versand (Telegram/SMTP), `shorewall restart`. Der erste Lauf
+  gegen echte Hardware ist für diese Pfade der erste Integrationstest —
+  begleite ihn mit Logs.
 - **Ein VPS-Endpunkt.** OMR bündelt alle WANs zu *einem* VPS. Echtes Multi-VPS-
   Failover über Standorte gibt es nicht; ein zweiter WireGuard-Server lässt sich
   als **Exit-VPN** hinter dem primären VPS nachschalten (VPS-Endpunkt → Exit-VPN).
 - **LuCI-Menüeintrag** „OMR Dashboard" auf dem Router ist eine Image-Änderung im
   Repo `openmptcprouter` und nicht Teil dieses Sidecars. Für den Zugriff genügt
   `BIND_ADDR:3000` bzw. der SSH-Tunnel.
-- **Zugangsdaten (`ROUTER_PASS`, `OMR_ADMIN_KEY`, `JWT_SECRET`, …) sind aktuell
-  nur über `.env` + Container-Neustart änderbar** — es gibt noch keine
-  Settings-Seite im Dashboard dafür (geplant, siehe
-  `dashboard/docs/routing-plan.de.md`, Abschnitt 8/10). Bis dahin: Werte in
-  `.env` anpassen und `docker compose up -d` ausführen, wie in
-  [Schritt 9 der Kurzanleitung](#komplettanleitung-in-12-schritten-kurzfassung)
-  beschrieben.
+- **Zugangsdaten sind inzwischen im Dashboard änderbar** (System → Verbindung
+  bzw. Sicherheit), verschlüsselt abgelegt und ohne Container-Neustart wirksam.
+  Die `.env` liefert nur noch die Startwerte; dort gesetzte Werte werden von
+  im Dashboard gespeicherten Änderungen überlagert.
+- **„Update ausführen" stößt kein echtes Update an.** Das Backend läuft im
+  Container und kann `omr-update` auf dem Host nicht ausführen; der Knopf
+  zeigt im Echtbetrieb den auszuführenden Konsolenbefehl an.
 - **Echtes IP-Passthrough an eine eigene Firewall** (ohne Doppel-NAT) ist noch
   nicht umgesetzt — siehe
   [Eigene Firewall hinter dem OMR-Router einrichten](#eigene-firewall-hinter-dem-omr-router-einrichten).

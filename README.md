@@ -129,7 +129,7 @@ reach it via an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 root@<vps>`.
 
 ```bash
 cd backend && . .venv/bin/activate
-pytest                      # 110 tests, all green in demo mode
+pytest                      # 154 tests, all green (demo + real-mode units)
 
 cd ../frontend && npm run build    # type-checks + builds all routes
 ```

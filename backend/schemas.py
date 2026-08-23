@@ -262,6 +262,30 @@ class TopologyHost(BaseModel):
 # --------------------------------------------------------------------------- #
 # Firewall
 # --------------------------------------------------------------------------- #
+_FIREWALL_ZONES = {"net", "fw", "vpn", "lan", "loc", "all"}
+
+
+def _validate_port_expr(v: str) -> str:
+    """Validate a port expression (``80``, ``80,443``, ``5000:5010``, mixes).
+
+    The value is written verbatim into the Shorewall rules file, so anything
+    beyond digits, commas and range colons must be rejected — whitespace or
+    stray tokens would become extra columns in the generated rule.
+    """
+    v = v.strip()
+    if not v:
+        raise ValueError("Port darf nicht leer sein")
+    for part in v.split(","):
+        lo, sep, hi = part.partition(":")
+        bounds = (lo, hi) if sep else (lo,)
+        for b in bounds:
+            if not b.isdigit() or not (1 <= int(b) <= 65535):
+                raise ValueError(f"{part!r} ist kein gültiger Port oder Bereich")
+        if sep and int(lo) >= int(hi):
+            raise ValueError(f"Bereich {part!r} muss aufsteigend sein")
+    return v
+
+
 class FirewallRule(BaseModel):
     id: Optional[str] = None
     action: Literal["allow", "block"] = "allow"
@@ -271,6 +295,26 @@ class FirewallRule(BaseModel):
     port: str = ""
     description: str = ""
     enabled: bool = True
+
+    @field_validator("port")
+    @classmethod
+    def _validate_port(cls, v: str) -> str:
+        return _validate_port_expr(v)
+
+    @field_validator("src_zone", "dest_zone")
+    @classmethod
+    def _validate_zone(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in _FIREWALL_ZONES:
+            raise ValueError(f"unbekannte Zone {v!r}")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def _clean_description(cls, v: str) -> str:
+        # Same rationale as PortForward: the description is rendered into a
+        # single-line comment in the rules file.
+        return " ".join(v.split())
 
 
 # --------------------------------------------------------------------------- #

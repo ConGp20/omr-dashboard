@@ -42,6 +42,11 @@ from schemas import FirewallRule, IngressTarget, PortForward
 _BEGIN = "# >>> OMR-DASHBOARD MANAGED (do not edit by hand) >>>"
 _END = "# <<< OMR-DASHBOARD MANAGED <<<"
 
+# Separate sentinel pair for plain ACCEPT/DROP rules, so the DNAT parser above
+# and the rules parser below never see each other's lines.
+_RULES_BEGIN = "# >>> OMR-DASHBOARD RULES (do not edit by hand) >>>"
+_RULES_END = "# <<< OMR-DASHBOARD RULES <<<"
+
 _MAX_DEST_ENTRIES = 20  # cap on repeated dest:port entries when approximating weights
 
 _log = logging.getLogger("omr_dashboard.shorewall")
@@ -150,7 +155,11 @@ class ShorewallService:
             if pf and pf.id:
                 if pf.id not in forwards:
                     order.append(pf.id)
-                forwards[pf.id] = pf
+                    forwards[pf.id] = pf
+                elif forwards[pf.id].proto != pf.proto:
+                    # Second line of a tcp/udp pair — merge instead of letting
+                    # the last-parsed line win (which read back as plain "udp").
+                    forwards[pf.id].proto = "tcp/udp"
             elif not pf:
                 _log.warning(
                     "Überspringe unlesbare DNAT-Zeile im verwalteten Block: %r", line
@@ -158,7 +167,9 @@ class ShorewallService:
         result = []
         for fid in order:
             pf = forwards[fid]
-            pf.deny_src_cidrs = deny_map.get(fid, [])
+            # A tcp/udp forward renders its DROP lines once per protocol, so
+            # the same CIDR arrives twice — deduplicate, keeping order.
+            pf.deny_src_cidrs = list(dict.fromkeys(deny_map.get(fid, [])))
             result.append(pf)
         return result
 
@@ -309,18 +320,26 @@ class ShorewallService:
         except (FileNotFoundError, subprocess.SubprocessError):
             pass
 
-    # --- firewall rules (simple) ------------------------------------------
+    # --- firewall rules ----------------------------------------------------
+    # Dashboard-managed ACCEPT/DROP rules live in their own sentinel block
+    # (separate from the DNAT block above, so neither parser sees the other's
+    # lines). Rules created outside the dashboard are intentionally not
+    # surfaced — we never rewrite lines we did not create.
     def list_rules(self) -> list[FirewallRule]:
         if self.settings.demo:
             return list(_demo_rules)
-        # For now we surface only dashboard-managed accept rules; full parsing
-        # of arbitrary shorewall rules is intentionally out of scope.
-        return []
+        return self._parse_rules()
 
     def add_rule(self, rule: FirewallRule) -> FirewallRule:
         rule.id = rule.id or uuid.uuid4().hex[:8]
         if self.settings.demo:
             _demo_rules.append(rule)
+            return rule
+        raw = self._read_lines()
+        rules = self._parse_rules(raw)
+        rules.append(rule)
+        self._write_rules(rules, raw)
+        self._apply()
         return rule
 
     def delete_rule(self, rule_id: str) -> bool:
@@ -328,7 +347,108 @@ class ShorewallService:
             before = len(_demo_rules)
             _demo_rules[:] = [r for r in _demo_rules if r.id != rule_id]
             return len(_demo_rules) < before
-        return False
+        raw = self._read_lines()
+        rules = self._parse_rules(raw)
+        new = [r for r in rules if r.id != rule_id]
+        if len(new) == len(rules):
+            return False
+        self._write_rules(new, raw)
+        self._apply()
+        return True
+
+    @staticmethod
+    def _zone_token(zone: str) -> str:
+        # "fw" is spelled $FW in Shorewall's rules file.
+        return "$FW" if zone == "fw" else zone
+
+    @staticmethod
+    def _zone_from_token(token: str) -> str:
+        return "fw" if token == "$FW" else token
+
+    def _render_rule(self, rule: FirewallRule) -> list[str]:
+        action = "ACCEPT" if rule.action == "allow" else "DROP"
+        desc = (rule.description or "").replace(" ", "_")
+        prefix = "" if rule.enabled else "#off "
+        return [
+            f"{prefix}{action}\t{self._zone_token(rule.src_zone)}"
+            f"\t{self._zone_token(rule.dest_zone)}\t{proto}\t{rule.port}"
+            f"\t# id={rule.id} desc={desc}"
+            for proto in _proto_tokens(rule.proto)
+        ]
+
+    def _parse_rules(self, lines: Optional[list[str]] = None) -> list[FirewallRule]:
+        rules: dict[str, FirewallRule] = {}
+        order: list[str] = []
+        in_block = False
+        for line in (lines if lines is not None else self._read_lines()):
+            stripped = line.strip()
+            if stripped == _RULES_BEGIN:
+                in_block = True
+                continue
+            if stripped == _RULES_END:
+                in_block = False
+                continue
+            if not in_block or not stripped:
+                continue
+            enabled = True
+            if stripped.startswith("#off "):
+                enabled = False
+                stripped = stripped[len("#off "):]
+            elif stripped.startswith("#"):
+                continue
+            rule = self._parse_rule_line(stripped, enabled)
+            if rule is None or not rule.id:
+                _log.warning("Überspringe unlesbare Regel im verwalteten Block: %r", line)
+                continue
+            if rule.id in rules:
+                # Second line of a tcp/udp pair — merge instead of overwrite.
+                if rules[rule.id].proto != rule.proto:
+                    rules[rule.id].proto = "tcp/udp"
+            else:
+                rules[rule.id] = rule
+                order.append(rule.id)
+        return [rules[rid] for rid in order]
+
+    def _parse_rule_line(self, line: str, enabled: bool) -> Optional[FirewallRule]:
+        # ACCEPT|DROP  src  dest  proto  port  # id=.. desc=..
+        try:
+            code, _, comment = line.partition("#")
+            parts = code.split()
+            if parts[0] not in ("ACCEPT", "DROP"):
+                return None
+            meta = dict(kv.split("=", 1) for kv in comment.strip().split() if "=" in kv)
+            return FirewallRule(
+                id=meta.get("id"),
+                action="allow" if parts[0] == "ACCEPT" else "block",
+                src_zone=self._zone_from_token(parts[1]),
+                dest_zone=self._zone_from_token(parts[2]),
+                proto=parts[3],  # type: ignore[arg-type]
+                port=parts[4],
+                description=meta.get("desc", "").replace("_", " "),
+                enabled=enabled,
+            )
+        except (ValueError, IndexError):
+            return None
+
+    def _write_rules(self, rules: list[FirewallRule], lines: Optional[list[str]] = None) -> None:
+        lines = lines if lines is not None else self._read_lines()
+        out: list[str] = []
+        in_block = False
+        for line in lines:
+            if line.strip() == _RULES_BEGIN:
+                in_block = True
+                continue
+            if line.strip() == _RULES_END:
+                in_block = False
+                continue
+            if not in_block:
+                out.append(line)
+        out.append(_RULES_BEGIN)
+        for rule in rules:
+            out.extend(self._render_rule(rule))
+        out.append(_RULES_END)
+        with open(self.path, "w") as fh:
+            fh.write("\n".join(out) + "\n")
 
 
 # Common firewall presets surfaced in the UI.
