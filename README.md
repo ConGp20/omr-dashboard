@@ -31,6 +31,8 @@ service, and aggregates everything (VPS + router) into one clean UI:
 > The underlying OMR technology is unchanged — this is purely a usability layer
 > on top of the existing APIs. LuCI remains available.
 
+> 🧪 **Erster Test auf echter Hardware:** [`docs/erster-test.de.md`](docs/erster-test.de.md)
+>
 > 📖 **Ausführliche deutsche Installationsanleitung:** [`INSTALL.de.md`](INSTALL.de.md)
 > — Schritt für Schritt vom Demo-Test bis zum Live-Betrieb auf dem VPS, inkl.
 > Wizard-Walkthrough, Tunnel-Zugriff und Fehlersuche.
@@ -129,7 +131,7 @@ reach it via an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 root@<vps>`.
 
 ```bash
 cd backend && . .venv/bin/activate
-pytest                      # 154 tests, all green (demo + real-mode units)
+pytest                      # 155 tests, all green (demo + real-mode units)
 
 cd ../frontend && npm run build    # type-checks + builds all routes
 ```

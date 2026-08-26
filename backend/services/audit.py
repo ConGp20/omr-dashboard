@@ -14,7 +14,8 @@ import logging
 from typing import Awaitable, Callable, Optional
 
 from fastapi import Request, Response
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 
 from config import get_settings
 
@@ -40,7 +41,7 @@ def actor_from_request(request: Request) -> str:
     try:
         payload = jwt.decode(header[7:], settings.jwt_secret, algorithms=["HS256"])
         return str(payload.get("sub") or "user")
-    except JWTError:
+    except InvalidTokenError:
         return "unknown"
 
 

@@ -502,6 +502,11 @@ umgesetzte Erweiterung — Konzept und Aufwand dazu stehen in
 
 ---
 
+## Erster Test auf echter Hardware
+
+Schritt-für-Schritt-Testplan mit Erfolgskriterien und Log-Sicherung:
+[`docs/erster-test.de.md`](docs/erster-test.de.md).
+
 ## Bekannte Einschränkungen (ehrlich)
 
 - **Noch kein Lauf gegen echte Hardware.** Inzwischen im Echtmodus getestet

@@ -315,10 +315,29 @@ class ShorewallService:
             fh.write("\n".join(out) + "\n")
 
     def _apply(self) -> None:
+        """Reload shorewall so the rewritten rules file takes effect.
+
+        Failures are logged loudly instead of swallowed: a write that lands in
+        the file but is never applied looks like success everywhere else, and
+        that silence is exactly what makes a first integration test opaque.
+        """
         try:
-            subprocess.run(["shorewall", "restart"], check=False, capture_output=True, timeout=60)
-        except (FileNotFoundError, subprocess.SubprocessError):
-            pass
+            proc = subprocess.run(["shorewall", "restart"], check=False,
+                                  capture_output=True, timeout=60)
+            if proc.returncode != 0:
+                _log.error(
+                    "shorewall restart schlug fehl (rc=%s): %s",
+                    proc.returncode,
+                    (proc.stderr or proc.stdout or b"").decode(errors="ignore")[-500:],
+                )
+        except FileNotFoundError:
+            _log.error(
+                "shorewall-Binary nicht gefunden — Regeländerung wurde in %s "
+                "geschrieben, ist aber NICHT aktiv (Container ohne shorewall?)",
+                self.path,
+            )
+        except subprocess.SubprocessError:
+            _log.error("shorewall restart fehlgeschlagen", exc_info=True)
 
     # --- firewall rules ----------------------------------------------------
     # Dashboard-managed ACCEPT/DROP rules live in their own sentinel block

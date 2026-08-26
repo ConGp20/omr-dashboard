@@ -11,7 +11,8 @@ import time
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
-from jose import JWTError, jwt
+import jwt
+from jwt import InvalidTokenError
 
 from config import get_settings
 
@@ -103,5 +104,5 @@ async def require_user(
     try:
         payload = jwt.decode(creds.credentials, s.jwt_secret, algorithms=["HS256"])
         return payload.get("sub", "user")
-    except JWTError:
+    except InvalidTokenError:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")

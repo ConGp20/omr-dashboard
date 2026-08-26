@@ -5,8 +5,10 @@ import { proxy } from "@/lib/backend";
 
 export const dynamic = "force-dynamic";
 
-function handler(req: NextRequest, ctx: { params: { path: string[] } }) {
-  return proxy(req, "/" + ctx.params.path.join("/"));
+// Next 15+: route params are provided as a Promise.
+async function handler(req: NextRequest, ctx: { params: Promise<{ path: string[] }> }) {
+  const { path } = await ctx.params;
+  return proxy(req, "/" + path.join("/"));
 }
 
 export const GET = handler;

@@ -13,7 +13,7 @@ from services import advisor
 
 
 def _settings(**over):
-    base = dict(demo=False, jwt_secret="a-real-secret", dashboard_pass="pw",
+    base = dict(demo=False, jwt_secret="a-real-secret-of-sufficient-length!", dashboard_pass="pw",
                 omr_admin_key="key", router_pass="rpw")
     base.update(over)
     return SimpleNamespace(**base)
@@ -241,3 +241,15 @@ def test_endpoint_reports_counts(client):
     body = client.get("/health-check").json()
     assert body["checked"] == len(advisor.CHECKS)
     assert body["errors"] + body["warnings"] + body["infos"] == len(body["findings"])
+
+
+def test_short_jwt_secret_warns_but_placeholder_does_not_double_report():
+    ctx = _ctx(settings=_settings(jwt_secret="short"))
+    f = advisor.check_jwt_secret_length(ctx)
+    assert len(f) == 1 and f[0].severity == "warn"
+    # The placeholder is already an error finding — no duplicate warning.
+    ctx = _ctx(settings=_settings(jwt_secret=advisor.DEFAULT_JWT_SECRET))
+    assert advisor.check_jwt_secret_length(ctx) == []
+    # 32+ chars is fine.
+    ctx = _ctx(settings=_settings(jwt_secret="x" * 32))
+    assert advisor.check_jwt_secret_length(ctx) == []

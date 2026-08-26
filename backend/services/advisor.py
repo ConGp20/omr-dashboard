@@ -61,6 +61,20 @@ def check_jwt_secret(ctx: AdvisorContext) -> list[Finding]:
         "/system", "security")]
 
 
+def check_jwt_secret_length(ctx: AdvisorContext) -> list[Finding]:
+    """RFC 7518 wants >= 32 bytes of key material for HS256."""
+    secret = ctx.settings.jwt_secret
+    if ctx.settings.demo or secret == DEFAULT_JWT_SECRET or len(secret) >= 32:
+        return []
+    return [_finding(
+        "jwt_short", "warn", "Sitzungsschlüssel ist zu kurz",
+        f"JWT_SECRET hat nur {len(secret)} Zeichen — unter den empfohlenen "
+        "32 Bytes für HS256 wird das Erraten per Brute-Force realistisch.",
+        "Unter System → Sicherheit einen längeren Zufallswert setzen, z. B. "
+        "64 Hex-Zeichen (openssl rand -hex 32).",
+        "/system", "security")]
+
+
 def check_dashboard_password(ctx: AdvisorContext) -> list[Finding]:
     if ctx.settings.demo:
         return []
@@ -306,6 +320,7 @@ def check_protocol_choice(ctx: AdvisorContext) -> list[Finding]:
 # --------------------------------------------------------------------------- #
 CHECKS: list[Callable[[AdvisorContext], list[Finding]]] = [
     check_jwt_secret,
+    check_jwt_secret_length,
     check_dashboard_password,
     check_bind_address,
     check_router_credentials,
