@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import { Network } from "lucide-react";
+import { AdvisorBanner } from "@/components/dashboard/AdvisorBanner";
 import { StatusBanner } from "@/components/dashboard/StatusBanner";
 import { LinkCard } from "@/components/dashboard/LinkCard";
 import { TopologyDiagram } from "@/components/dashboard/TopologyDiagram";
@@ -14,6 +15,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-5">
+      <AdvisorBanner />
       <StatusBanner />
 
       {/* Active protocol chip */}

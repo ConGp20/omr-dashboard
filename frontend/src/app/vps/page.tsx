@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Plus, Trash2, Server, Shield, Network, Globe } from "lucide-react";
+import { Plus, Trash2, Server, Shield, Network, Globe, Route } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { OwnerBadge } from "@/components/OwnerBadge";
 import {
@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
-import type { PortForward, ExitVpn, NatStatus, TopologyHost } from "@/lib/types";
+import type { PortForward, ExitVpn, NatStatus, RoutingOverview, TopologyHost } from "@/lib/types";
 
 const EMPTY_FORWARD: PortForward = {
   description: "", proto: "tcp", src_port: 0, dest_ip: "", dest_port: 0, enabled: true,
@@ -309,6 +309,37 @@ function NatSection() {
   );
 }
 
+function RoutingSection() {
+  const { data } = useApi<RoutingOverview>("/vps/routing");
+  if (!data) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Route size={16} /> Routing-Übersicht <OwnerBadge owner="vps" />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <div className="flex justify-between">
+          <span className="text-muted">Standard-Ausgang</span>
+          <Badge tone={data.exit_vpn_enabled ? "primary" : "good"}>
+            {data.exit_vpn_enabled ? "Exit-VPN" : "Direkt ins Internet"}
+          </Badge>
+        </div>
+        {data.routes.map((r) => (
+          <div key={r.destination} className="flex justify-between rounded-lg border border-border p-2">
+            <span className="tabular text-fg">{r.destination}</span>
+            <span className="text-xs text-muted">über {r.via}</span>
+          </div>
+        ))}
+        <p className="text-xs text-muted">
+          So verlässt der Verkehr den VPS. Den Ausgang änderst Du oben unter „Exit-VPN“.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function VpsPage() {
   return (
     <div>
@@ -321,6 +352,7 @@ export default function VpsPage() {
         <div className="lg:col-span-2"><PortForwardSection /></div>
         <ExitVpnSection />
         <NatSection />
+        <RoutingSection />
       </div>
     </div>
   );

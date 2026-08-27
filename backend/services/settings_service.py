@@ -53,6 +53,14 @@ def _load_or_create_key(data_dir: str) -> bytes:
     return key
 
 
+def machine_key(data_dir: str) -> bytes:
+    """The 256-bit machine-local key used for encrypted-at-rest stores.
+
+    Shared with ``alerts_service`` so both encrypt their blobs with the same
+    unattended key (see module docstring for the threat model)."""
+    return _load_or_create_key(data_dir)
+
+
 class SettingsStoreError(RuntimeError):
     """The store file exists but can't be decrypted (corrupt file, lost key,
     ...). Writes must raise this instead of silently treating it as empty —

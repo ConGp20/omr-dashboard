@@ -55,6 +55,7 @@ class LinkStatus(BaseModel):
     enabled: bool = True
     priority: int = 0
     ip: Optional[str] = None
+    device: Optional[str] = None   # L3 device name, used to read byte counters
     rx_bps: float = 0.0
     tx_bps: float = 0.0
     latency_ms: Optional[float] = None
@@ -261,6 +262,30 @@ class TopologyHost(BaseModel):
 # --------------------------------------------------------------------------- #
 # Firewall
 # --------------------------------------------------------------------------- #
+_FIREWALL_ZONES = {"net", "fw", "vpn", "lan", "loc", "all"}
+
+
+def _validate_port_expr(v: str) -> str:
+    """Validate a port expression (``80``, ``80,443``, ``5000:5010``, mixes).
+
+    The value is written verbatim into the Shorewall rules file, so anything
+    beyond digits, commas and range colons must be rejected — whitespace or
+    stray tokens would become extra columns in the generated rule.
+    """
+    v = v.strip()
+    if not v:
+        raise ValueError("Port darf nicht leer sein")
+    for part in v.split(","):
+        lo, sep, hi = part.partition(":")
+        bounds = (lo, hi) if sep else (lo,)
+        for b in bounds:
+            if not b.isdigit() or not (1 <= int(b) <= 65535):
+                raise ValueError(f"{part!r} ist kein gültiger Port oder Bereich")
+        if sep and int(lo) >= int(hi):
+            raise ValueError(f"Bereich {part!r} muss aufsteigend sein")
+    return v
+
+
 class FirewallRule(BaseModel):
     id: Optional[str] = None
     action: Literal["allow", "block"] = "allow"
@@ -270,6 +295,26 @@ class FirewallRule(BaseModel):
     port: str = ""
     description: str = ""
     enabled: bool = True
+
+    @field_validator("port")
+    @classmethod
+    def _validate_port(cls, v: str) -> str:
+        return _validate_port_expr(v)
+
+    @field_validator("src_zone", "dest_zone")
+    @classmethod
+    def _validate_zone(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in _FIREWALL_ZONES:
+            raise ValueError(f"unbekannte Zone {v!r}")
+        return v
+
+    @field_validator("description")
+    @classmethod
+    def _clean_description(cls, v: str) -> str:
+        # Same rationale as PortForward: the description is rendered into a
+        # single-line comment in the rules file.
+        return " ".join(v.split())
 
 
 # --------------------------------------------------------------------------- #
@@ -317,6 +362,92 @@ class Event(BaseModel):
     type: str
     detail: str
     severity: Literal["info", "warn", "error"] = "info"
+
+
+# --------------------------------------------------------------------------- #
+# Monthly data usage (per WAN), for tracking ISP volume limits
+# --------------------------------------------------------------------------- #
+class LinkUsage(BaseModel):
+    link_id: str
+    label: str = ""
+    rx_bytes: float = 0.0
+    tx_bytes: float = 0.0
+    total_bytes: float = 0.0
+    cap_gb: Optional[float] = None      # monthly cap in GB; None = no limit set
+    warn_pct: int = 80                  # warn threshold, percent of the cap
+    used_pct: Optional[float] = None    # total vs cap; None when no cap is set
+    over_warn: bool = False
+    over_cap: bool = False
+    # Linear projection to month end from the rate so far — lets the UI warn
+    # before a cap is actually hit rather than after.
+    projected_bytes: float = 0.0
+    projected_pct: Optional[float] = None
+    projected_over_cap: bool = False
+
+
+class UsageResponse(BaseModel):
+    month: str                          # "YYYY-MM" (UTC)
+    total_bytes: float = 0.0
+    links: list[LinkUsage] = Field(default_factory=list)
+    day_of_month: int = 1
+    days_in_month: int = 30
+
+
+class QuotaUpdate(BaseModel):
+    cap_gb: Optional[float] = Field(default=None, ge=0)   # 0/None clears the cap
+    warn_pct: Optional[int] = Field(default=None, ge=1, le=100)
+
+
+# --------------------------------------------------------------------------- #
+# Alerts / notifications
+# --------------------------------------------------------------------------- #
+class AlertConfigUpdate(BaseModel):
+    """Partial update of the alert channel configuration.
+
+    All fields optional: only provided values are applied. Empty strings on
+    secret fields are ignored so a save that doesn't re-enter the secret keeps
+    the stored one.
+    """
+    min_severity: Optional[Literal["warn", "error"]] = None
+    # 0 disables throttling; otherwise the same event is sent at most once per
+    # this many minutes (flapping protection).
+    cooldown_minutes: Optional[int] = Field(default=None, ge=0, le=1440)
+    telegram_enabled: Optional[bool] = None
+    telegram_token: Optional[str] = None
+    telegram_chat_id: Optional[str] = None
+    webhook_enabled: Optional[bool] = None
+    webhook_url: Optional[str] = None
+    email_enabled: Optional[bool] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = Field(default=None, ge=1, le=65535)
+    smtp_user: Optional[str] = None
+    smtp_pass: Optional[str] = None
+    smtp_tls: Optional[bool] = None
+    email_from: Optional[str] = None
+    email_to: Optional[str] = None
+
+
+class AlertConfigPublic(BaseModel):
+    """Alert config as returned to the UI — secrets masked to booleans."""
+    min_severity: str = "warn"
+    cooldown_minutes: int = 10
+    telegram_enabled: bool = False
+    telegram_chat_id: Optional[str] = None
+    telegram_token_set: bool = False
+    webhook_enabled: bool = False
+    webhook_url: Optional[str] = None
+    email_enabled: bool = False
+    smtp_host: Optional[str] = None
+    smtp_port: int = 587
+    smtp_user: Optional[str] = None
+    smtp_pass_set: bool = False
+    smtp_tls: bool = True
+    email_from: Optional[str] = None
+    email_to: Optional[str] = None
+
+
+class AlertTestResult(BaseModel):
+    results: dict[str, str] = Field(default_factory=dict)  # channel -> outcome
 
 
 # --------------------------------------------------------------------------- #
@@ -463,3 +594,30 @@ class LoginRequest(BaseModel):
 class TokenResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+
+
+class AuthStatus(BaseModel):
+    auth_required: bool
+    demo: bool = False
+    username: str = "admin"
+
+
+# --------------------------------------------------------------------------- #
+# Configuration advisor (non-blocking hints and recommendations)
+# --------------------------------------------------------------------------- #
+class Finding(BaseModel):
+    id: str
+    severity: Literal["error", "warn", "info"]
+    title: str
+    detail: str                        # what is wrong and why it matters
+    action: str                        # what to do about it
+    page: Optional[str] = None         # deep link to where it is changed
+    category: str = "general"
+
+
+class HealthReport(BaseModel):
+    findings: list[Finding] = Field(default_factory=list)
+    errors: int = 0
+    warnings: int = 0
+    infos: int = 0
+    checked: int = 0

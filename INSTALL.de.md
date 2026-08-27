@@ -360,6 +360,97 @@ verschlüsseltes `.omr-backup.json.gz` erzeugen (Passwort wählen — die Tunnel
 werden AES-256-GCM verschlüsselt, nie im Klartext). Wiederherstellen über
 **System → Restore** oder direkt im Wizard (Schritt 1 → „Backup wiederherstellen").
 
+Das Backup enthält auch die **Datenlimits** pro WAN und die **Alarm-Konfiguration**
+(Bot-Token und SMTP-Passwort liegen im verschlüsselten Teil). Nach einer
+Wiederherstellung sind beide sofort wieder aktiv.
+
+---
+
+## Anmeldung
+
+Sobald ein Dashboard-Passwort gesetzt ist (`DASHBOARD_PASS` in der `.env` — das
+Install-Script setzt es automatisch), erscheint beim Aufruf eine Anmeldemaske.
+
+- Benutzer ist standardmäßig `admin`, das Passwort steht in der `.env`.
+- Ist **kein** Passwort gesetzt (frische Installation) oder läuft das Dashboard
+  im Demo-Modus, entfällt die Anmeldung — es gäbe nichts zu prüfen.
+- Das Sitzungs-Token liegt in einem httpOnly-Cookie und ist für JavaScript im
+  Browser nicht lesbar. Der Server hängt es intern an jede Anfrage.
+- Nach fünf Fehlversuchen ist die Anmeldung fünf Minuten gesperrt (pro
+  Absender-IP). Passwörter werden zeitkonstant verglichen.
+- Abmelden: unten in der Seitenleiste.
+
+Passwort ändern unter **System → Sicherheit**. Wenn Du dort auch das
+JWT-Secret änderst, werden alle offenen Sitzungen sofort abgemeldet.
+
+## Systemcheck: Hinweise und Empfehlungen
+
+Die Seite **Systemcheck** prüft die Konfiguration und meldet, was auffällt —
+**rein beratend**. Nichts davon blockiert eine Aktion; Du kannst jeden Punkt
+ignorieren.
+
+Geprüft werden unter anderem:
+
+| Bereich | Beispiel |
+|---|---|
+| Sicherheit | JWT-Secret noch der Platzhalter, kein Dashboard-Passwort, `BIND_ADDR` öffentlich erreichbar |
+| Verbindung | Kein Tunnel aktiv, nur eine Leitung, Leitung mit hohem Paketverlust/Latenz |
+| Datenverbrauch | Mobilfunk-Leitung ohne Limit, Limit fast/ganz erreicht, Hochrechnung überschreitet das Limit |
+| Benachrichtigungen | Kein Kanal aktiv, Wiederholsperre abgeschaltet |
+| Leistung | Ein anderes Tunnel-Protokoll passt besser zum Leitungsmix |
+
+Jeder Befund nennt **was** auffällt, **warum** das zählt und **was zu tun ist** —
+mit Direktlink auf die passende Seite. Auf der Übersicht erscheint zusätzlich
+eine dezente Zeile mit dem wichtigsten offenen Punkt; gibt es nichts zu melden,
+ist sie unsichtbar.
+
+## Datenverbrauch überwachen (ISP-Limits)
+
+Unter **Datenverbrauch** siehst Du pro WAN das Volumen des laufenden Monats.
+
+- Die Werte kommen aus den **Interface-Zählern des Routers** — also aus dem
+  Kernel, nicht aus Stichproben. Dadurch geht auch zwischen zwei Messungen
+  nichts verloren. Kann eine Leitung keine Zähler liefern, rechnet das Dashboard
+  ersatzweise aus der gemessenen Rate hoch.
+- Ein Router-Neustart setzt die Zähler zurück; das wird erkannt und **nicht**
+  als riesiger Verbrauch verbucht.
+- Pro Leitung lassen sich **Monatslimit (GB)** und **Warnschwelle (%)** setzen.
+  Beim Überschreiten entsteht ein Ereignis (und, falls eingerichtet, ein Alarm) —
+  einmalig pro Monat und Schwelle, nicht bei jeder Messung.
+- Der Monat wird in UTC gezählt. Die Verbrauchshistorie bleibt ca. 13 Monate
+  erhalten, deutlich länger als die feingranularen Messwerte.
+- Zusätzlich rechnet das Dashboard den Verbrauch aufs Monatsende hoch. Der
+  kleine Strich im Balken zeigt, wo Du bei gleichbleibendem Tempo landest —
+  so siehst Du eine Überschreitung, **bevor** sie eintritt. Die Hochrechnung
+  startet erst nach etwa 15 % des Monats, damit ein einzelner großer Download
+  am 2. keine Fehlprognose auslöst.
+
+## Alarme einrichten
+
+Unter **Alarme** legst Du fest, worüber Du informiert wirst:
+
+| Kanal | Was Du brauchst |
+|---|---|
+| **Telegram** | Bot-Token (von `@BotFather`) und Chat-ID |
+| **Webhook** | Eine URL — bekommt das Ereignis als JSON per POST |
+| **E-Mail** | SMTP-Server, Port, Zugangsdaten, Absender und Empfänger |
+
+Ausgelöst wird bei WAN-Ausfall, Wiederkehr, beeinträchtigter Leitung, Wechsel
+des Gesamtzustands (z. B. **offline** — der wichtigste Fall) und bei erreichten
+Datenlimits.
+
+Zwei Einstellungen steuern die Menge:
+
+- **Schwere:** „Warnung & Fehler" (Standard) oder „nur Fehler".
+- **Wiederholsperre:** Dieselbe Meldung geht höchstens einmal pro Zeitfenster
+  raus (Standard 10 Minuten). Das verhindert Nachrichtenfluten bei einer
+  flatternden Leitung — **neue** Meldungen (eine zweite Leitung fällt aus, oder
+  die Entwarnung) kommen davon unabhängig sofort durch. `0` schaltet die Sperre ab.
+
+Mit **Test senden** prüfst Du jeden aktiven Kanal einzeln; das Ergebnis wird pro
+Kanal angezeigt. Die Zugangsdaten werden verschlüsselt auf dem VPS abgelegt
+(`alerts.enc`) und nie an den Browser zurückgegeben.
+
 ---
 
 ## Eigene Firewall hinter dem OMR-Router einrichten
@@ -411,25 +502,35 @@ umgesetzte Erweiterung — Konzept und Aufwand dazu stehen in
 
 ---
 
+## Erster Test auf echter Hardware
+
+Schritt-für-Schritt-Testplan mit Erfolgskriterien und Log-Sicherung:
+[`docs/erster-test.de.md`](docs/erster-test.de.md).
+
 ## Bekannte Einschränkungen (ehrlich)
 
-- **Nur Demo-Modus end-to-end verifiziert.** Die Live-Pfade (omr-admin,
-  Router-ubus, Shorewall, WireGuard) sind korrekt verdrahtet, aber der erste
-  Lauf gegen echte Hardware ist der erste echte Integrationstest — begleite ihn
-  mit Logs.
+- **Noch kein Lauf gegen echte Hardware.** Inzwischen im Echtmodus getestet
+  (ohne Gerät möglich): Shorewall-Dateiverwaltung (Regeln + Weiterleitungen,
+  inkl. Roundtrip), Anmeldung mit gesetztem Passwort, Schlüssel-Extraktion aus
+  der omr-admin-Config, Backup/Restore, Verbrauchslogik. **Nicht** ohne Gerät
+  testbar und daher unverifiziert: echte ubus-Aufrufe an den Router (Wizard-
+  Schlüsselübertragung, Interface-Zähler), echte omr-admin-HTTP-Aufrufe,
+  echter Alarm-Versand (Telegram/SMTP), `shorewall restart`. Der erste Lauf
+  gegen echte Hardware ist für diese Pfade der erste Integrationstest —
+  begleite ihn mit Logs.
 - **Ein VPS-Endpunkt.** OMR bündelt alle WANs zu *einem* VPS. Echtes Multi-VPS-
   Failover über Standorte gibt es nicht; ein zweiter WireGuard-Server lässt sich
   als **Exit-VPN** hinter dem primären VPS nachschalten (VPS-Endpunkt → Exit-VPN).
 - **LuCI-Menüeintrag** „OMR Dashboard" auf dem Router ist eine Image-Änderung im
   Repo `openmptcprouter` und nicht Teil dieses Sidecars. Für den Zugriff genügt
   `BIND_ADDR:3000` bzw. der SSH-Tunnel.
-- **Zugangsdaten (`ROUTER_PASS`, `OMR_ADMIN_KEY`, `JWT_SECRET`, …) sind aktuell
-  nur über `.env` + Container-Neustart änderbar** — es gibt noch keine
-  Settings-Seite im Dashboard dafür (geplant, siehe
-  `dashboard/docs/routing-plan.de.md`, Abschnitt 8/10). Bis dahin: Werte in
-  `.env` anpassen und `docker compose up -d` ausführen, wie in
-  [Schritt 9 der Kurzanleitung](#komplettanleitung-in-12-schritten-kurzfassung)
-  beschrieben.
+- **Zugangsdaten sind inzwischen im Dashboard änderbar** (System → Verbindung
+  bzw. Sicherheit), verschlüsselt abgelegt und ohne Container-Neustart wirksam.
+  Die `.env` liefert nur noch die Startwerte; dort gesetzte Werte werden von
+  im Dashboard gespeicherten Änderungen überlagert.
+- **„Update ausführen" stößt kein echtes Update an.** Das Backend läuft im
+  Container und kann `omr-update` auf dem Host nicht ausführen; der Knopf
+  zeigt im Echtbetrieb den auszuführenden Konsolenbefehl an.
 - **Echtes IP-Passthrough an eine eigene Firewall** (ohne Doppel-NAT) ist noch
   nicht umgesetzt — siehe
   [Eigene Firewall hinter dem OMR-Router einrichten](#eigene-firewall-hinter-dem-omr-router-einrichten).
