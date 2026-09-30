@@ -30,12 +30,28 @@ function PortForwardSection() {
 
   const FIREWALL_PRESET = { label: "Firewall/VPN Durchleitung", port: 1194, proto: "udp" as const };
 
+  // Write endpoints answer "" when shorewall applied the change, otherwise the
+  // reason it is saved but not live — that must be shown, never swallowed.
+  const [notice, setNotice] = useState<string | null>(null);
+  const run = async (action: () => Promise<{ warning?: string } | undefined>, ok: string) => {
+    try {
+      const res = await action();
+      setNotice(res?.warning || ok);
+      return true;
+    } catch (e) {
+      setNotice(`Fehler: ${(e as Error).message}`);
+      return false;
+    } finally {
+      refetch();
+    }
+  };
+
   const add = async () => {
-    await api.post("/vps/portforward", form);
-    setAdding(false);
-    setAdvanced(false);
-    setForm(EMPTY_FORWARD);
-    refetch();
+    if (await run(() => api.post<{ warning?: string }>("/vps/portforward", form), "Weiterleitung angelegt.")) {
+      setAdding(false);
+      setAdvanced(false);
+      setForm(EMPTY_FORWARD);
+    }
   };
 
   const addExtraTarget = () =>
@@ -47,14 +63,11 @@ function PortForwardSection() {
     }));
   const removeExtraTarget = (i: number) =>
     setForm((f) => ({ ...f, extra_targets: f.extra_targets.filter((_, idx) => idx !== i) }));
-  const toggle = async (pf: PortForward) => {
-    await api.put(`/vps/portforward/${pf.id}`, { ...pf, enabled: !pf.enabled });
-    refetch();
-  };
-  const remove = async (id: string) => {
-    await api.del(`/vps/portforward/${id}`);
-    refetch();
-  };
+  const toggle = (pf: PortForward) =>
+    run(() => api.put<{ warning?: string }>(`/vps/portforward/${pf.id}`, { ...pf, enabled: !pf.enabled }),
+        pf.enabled ? "Weiterleitung deaktiviert." : "Weiterleitung aktiviert.");
+  const remove = (id: string) =>
+    run(() => api.del<{ warning?: string }>(`/vps/portforward/${id}`), "Weiterleitung entfernt.");
 
   return (
     <Card>
@@ -67,6 +80,12 @@ function PortForwardSection() {
         </Button>
       </CardHeader>
       <CardContent className="space-y-2">
+        {notice && (
+          <div className={`rounded-lg border px-3 py-2 text-sm ${
+            notice.startsWith("Gespeichert, aber nicht aktiv") || notice.startsWith("Fehler")
+              ? "border-warn/40 bg-warn/10 text-fg"
+              : "border-border bg-surface-2 text-fg"}`}>{notice}</div>
+        )}
         <p className="text-xs text-muted">
           Leite Ports von der öffentlichen VPS-IP an Geräte im LAN weiter — z. B. um
           die VPN-Funktion deiner eigenen Firewall von außen erreichbar zu machen

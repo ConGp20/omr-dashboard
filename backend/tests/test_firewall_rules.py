@@ -162,3 +162,53 @@ def test_api_rejects_injection_port(client):
         "action": "allow", "src_zone": "net", "dest_zone": "fw",
         "proto": "tcp", "port": "80 443", "description": "x"})
     assert res.status_code == 422
+
+
+# --- a failed reload must never read as success ------------------------------
+def test_failed_reload_is_reported_not_swallowed(tmp_path, monkeypatch):
+    # Exactly what the first end-to-end install found: the rule reached the
+    # file, the reload failed, and the UI still said "opened". _apply() must
+    # hand back a reason the API can show.
+    svc = ShorewallService()
+    svc.settings = SimpleNamespace(demo=False)
+    svc.path = str(tmp_path / "rules")
+    monkeypatch.setenv("PATH", str(tmp_path))          # no shorewall binary
+    svc.add_rule(_rule())
+    assert svc.last_warning.startswith("Gespeichert, aber nicht aktiv")
+    assert len(svc.list_rules()) == 1                  # still written to disk
+
+
+def test_failed_reload_nonzero_exit_carries_shorewalls_reason(tmp_path, monkeypatch):
+    fake = tmp_path / "shorewall"
+    fake.write_text("#!/bin/sh\necho '   ERROR: /etc/shorewall/shorewall.conf does not exist!' >&2\nexit 2\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    svc = ShorewallService()
+    svc.settings = SimpleNamespace(demo=False)
+    svc.path = str(tmp_path / "rules")
+    assert "shorewall.conf does not exist" in svc._apply()
+
+
+def test_successful_reload_clears_the_warning(tmp_path, monkeypatch):
+    fake = tmp_path / "shorewall"
+    fake.write_text("#!/bin/sh\nexit 0\n")
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", str(tmp_path))
+    svc = ShorewallService()
+    svc.settings = SimpleNamespace(demo=False)
+    svc.path = str(tmp_path / "rules")
+    assert svc._apply() == ""
+    assert svc.last_warning == ""
+
+
+def test_api_results_carry_a_warning_field(client):
+    rule = client.post("/firewall/rules", json={
+        "action": "allow", "src_zone": "net", "dest_zone": "fw",
+        "proto": "tcp", "port": "8443", "description": "w"}).json()
+    assert rule["warning"] == ""                        # demo: nothing to apply
+    assert client.delete(f"/firewall/rules/{rule['id']}").json()["warning"] == ""
+    pf = client.post("/vps/portforward", json={
+        "description": "w", "proto": "tcp", "src_port": 9443,
+        "dest_ip": "192.168.100.9", "dest_port": 443, "enabled": True}).json()
+    assert pf["warning"] == ""
+    assert client.delete(f"/vps/portforward/{pf['id']}").json()["warning"] == ""

@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from auth import require_user
 from config import get_settings
 from deps import get_aggregator
-from schemas import ExitVpn, NatStatus, PortForward, TopologyHost
+from schemas import ExitVpn, NatStatus, PortForward, PortForwardResult, TopologyHost
 from services.omr_proxy import OmrProxy
 from services.router_proxy import RouterProxy
 from services.shorewall_service import ShorewallService
@@ -21,24 +21,28 @@ async def list_forwards(_: str = Depends(require_user)) -> list[PortForward]:
     return ShorewallService().list_forwards()
 
 
-@router.post("/portforward", response_model=PortForward)
-async def add_forward(pf: PortForward, _: str = Depends(require_user)) -> PortForward:
-    return ShorewallService().add_forward(pf)
+@router.post("/portforward", response_model=PortForwardResult)
+async def add_forward(pf: PortForward, _: str = Depends(require_user)) -> PortForwardResult:
+    svc = ShorewallService()
+    saved = svc.add_forward(pf)
+    return PortForwardResult(**saved.model_dump(), warning=svc.last_warning)
 
 
-@router.put("/portforward/{pf_id}", response_model=PortForward)
-async def update_forward(pf_id: str, pf: PortForward, _: str = Depends(require_user)) -> PortForward:
-    result = ShorewallService().update_forward(pf_id, pf)
+@router.put("/portforward/{pf_id}", response_model=PortForwardResult)
+async def update_forward(pf_id: str, pf: PortForward, _: str = Depends(require_user)) -> PortForwardResult:
+    svc = ShorewallService()
+    result = svc.update_forward(pf_id, pf)
     if result is None:
         raise HTTPException(status_code=404, detail="Weiterleitung nicht gefunden")
-    return result
+    return PortForwardResult(**result.model_dump(), warning=svc.last_warning)
 
 
 @router.delete("/portforward/{pf_id}")
 async def delete_forward(pf_id: str, _: str = Depends(require_user)) -> dict:
-    if not ShorewallService().delete_forward(pf_id):
+    svc = ShorewallService()
+    if not svc.delete_forward(pf_id):
         raise HTTPException(status_code=404, detail="Weiterleitung nicht gefunden")
-    return {"success": True}
+    return {"success": True, "warning": svc.last_warning}
 
 
 @router.get("/hosts", response_model=list[TopologyHost])

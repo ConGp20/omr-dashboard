@@ -9,6 +9,8 @@ import { ShieldCheck, Plus, Trash2, ListChecks } from "lucide-react";
 import type { FirewallRule } from "@/lib/types";
 
 interface Preset { id: string; name: string; ports: string; proto: string; description: string; }
+// Write endpoints report "" when the change is live, else why it is not.
+interface Applied { warning?: string }
 
 const EMPTY: FirewallRule = {
   action: "allow", src_zone: "net", dest_zone: "fw",
@@ -26,14 +28,14 @@ export default function FirewallPage() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.post<FirewallRule>("/firewall/rules", {
+      const res = await api.post<Applied>("/firewall/rules", {
         ...EMPTY,
         proto: p.proto === "udp" ? "udp" : p.proto === "tcp/udp" ? "tcp/udp" : "tcp",
         port: p.ports,
         description: p.name,
       });
       rules.refetch();
-      setMsg(`„${p.name}“ geöffnet (${p.ports}/${p.proto}).`);
+      setMsg(res.warning || `„${p.name}“ geöffnet (${p.ports}/${p.proto}).`);
     } catch (e) {
       setMsg(`Fehler: ${(e as Error).message}`);
     } finally {
@@ -45,10 +47,10 @@ export default function FirewallPage() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.post<FirewallRule>("/firewall/rules", form);
+      const res = await api.post<Applied>("/firewall/rules", form);
       setForm(EMPTY);
       rules.refetch();
-      setMsg("Regel angelegt.");
+      setMsg(res.warning || "Regel angelegt.");
     } catch (e) {
       setMsg(`Fehler: ${(e as Error).message}`);
     } finally {
@@ -59,8 +61,9 @@ export default function FirewallPage() {
   const remove = async (id: string) => {
     setBusy(true);
     try {
-      await api.del(`/firewall/rules/${encodeURIComponent(id)}`);
+      const res = await api.del<Applied>(`/firewall/rules/${encodeURIComponent(id)}`);
       rules.refetch();
+      setMsg(res.warning || "Regel entfernt.");
     } catch (e) {
       setMsg(`Fehler: ${(e as Error).message}`);
     } finally {
@@ -79,7 +82,10 @@ export default function FirewallPage() {
       />
 
       {msg && (
-        <div className="mb-4 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-fg">{msg}</div>
+        <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
+          msg.startsWith("Gespeichert, aber nicht aktiv") || msg.startsWith("Fehler")
+            ? "border-warn/40 bg-warn/10 text-fg"
+            : "border-border bg-surface text-fg"}`}>{msg}</div>
       )}
 
       {/* Zone overview */}

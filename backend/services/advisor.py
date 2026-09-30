@@ -143,6 +143,16 @@ def check_link_count(ctx: AdvisorContext) -> list[Finding]:
     enabled = [l for l in ctx.status.links if l.enabled]
     if len(enabled) >= 2:
         return []
+    if not enabled:
+        # Zero is a different problem from one: nothing is visible at all, which
+        # almost always means the router can't be reached — not a bonding choice.
+        return [_finding(
+            "no_links", "warn", "Keine Leitungen erkannt",
+            "Das Dashboard sieht keine einzige WAN-Leitung. Meist ist der Router "
+            "nicht erreichbar oder die Router-Zugangsdaten fehlen.",
+            "Unter System → Verbindung die Router-Zugangsdaten eintragen und "
+            "„Verbindung testen“ ausführen.",
+            "/system", "connectivity")]
     return [_finding(
         "single_link", "info", "Nur eine Leitung aktiv",
         "Bündelung braucht mindestens zwei Leitungen. Mit einer aktiven Leitung "

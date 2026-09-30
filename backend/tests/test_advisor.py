@@ -253,3 +253,12 @@ def test_short_jwt_secret_warns_but_placeholder_does_not_double_report():
     # 32+ chars is fine.
     ctx = _ctx(settings=_settings(jwt_secret="x" * 32))
     assert advisor.check_jwt_secret_length(ctx) == []
+
+
+def test_zero_links_is_not_reported_as_single_link():
+    # Found by the first end-to-end install: with no router reachable the
+    # check said "only one line active", sending the user the wrong way.
+    f = advisor.check_link_count(_ctx(links=[]))
+    assert len(f) == 1
+    assert f[0].id == "no_links" and f[0].severity == "warn"
+    assert f[0].page == "/system"

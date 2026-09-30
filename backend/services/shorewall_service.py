@@ -69,6 +69,8 @@ class ShorewallService:
     def __init__(self) -> None:
         self.settings = get_settings()
         self.path = self.settings.shorewall_rules
+        # Set by _apply(): "" when the last change is live, else why not.
+        self.last_warning = ""
 
     # --- port forwarding ---------------------------------------------------
     def list_forwards(self) -> list[PortForward]:
@@ -314,30 +316,33 @@ class ShorewallService:
         with open(self.path, "w") as fh:
             fh.write("\n".join(out) + "\n")
 
-    def _apply(self) -> None:
+    def _apply(self) -> str:
         """Reload shorewall so the rewritten rules file takes effect.
 
-        Failures are logged loudly instead of swallowed: a write that lands in
-        the file but is never applied looks like success everywhere else, and
-        that silence is exactly what makes a first integration test opaque.
+        Returns "" on success, otherwise a short user-facing warning, which is
+        also stored on ``self.last_warning`` for the API to pass to the UI.
+        The file has been written either way — the caller must not report a
+        silent success when the change is not actually active.
         """
+        warning = ""
         try:
             proc = subprocess.run(["shorewall", "restart"], check=False,
                                   capture_output=True, timeout=60)
             if proc.returncode != 0:
-                _log.error(
-                    "shorewall restart schlug fehl (rc=%s): %s",
-                    proc.returncode,
-                    (proc.stderr or proc.stdout or b"").decode(errors="ignore")[-500:],
-                )
+                detail = (proc.stderr or proc.stdout or b"").decode(errors="ignore").strip()
+                _log.error("shorewall restart schlug fehl (rc=%s): %s",
+                           proc.returncode, detail[-500:])
+                warning = ("Gespeichert, aber nicht aktiv: Shorewall-Neustart "
+                           f"fehlgeschlagen — {detail.splitlines()[-1] if detail else f'rc={proc.returncode}'}")
         except FileNotFoundError:
-            _log.error(
-                "shorewall-Binary nicht gefunden — Regeländerung wurde in %s "
-                "geschrieben, ist aber NICHT aktiv (Container ohne shorewall?)",
-                self.path,
-            )
+            _log.error("shorewall-Binary nicht gefunden — Änderung in %s geschrieben, "
+                       "ist aber NICHT aktiv", self.path)
+            warning = "Gespeichert, aber nicht aktiv: shorewall ist im Container nicht installiert."
         except subprocess.SubprocessError:
             _log.error("shorewall restart fehlgeschlagen", exc_info=True)
+            warning = "Gespeichert, aber nicht aktiv: Shorewall-Neustart fehlgeschlagen (siehe Server-Log)."
+        self.last_warning = warning
+        return warning
 
     # --- firewall rules ----------------------------------------------------
     # Dashboard-managed ACCEPT/DROP rules live in their own sentinel block

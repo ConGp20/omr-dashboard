@@ -235,6 +235,10 @@ class PortForward(BaseModel):
         return self
 
 
+class PortForwardResult(PortForward):
+    # "" when shorewall applied the change; otherwise why it is saved but not live.
+    warning: str = ""
+
 class ExitVpn(BaseModel):
     enabled: bool = False
     type: Literal["wireguard", "openvpn", "none"] = "none"
@@ -315,6 +319,12 @@ class FirewallRule(BaseModel):
         # Same rationale as PortForward: the description is rendered into a
         # single-line comment in the rules file.
         return " ".join(v.split())
+
+
+
+class FirewallRuleResult(FirewallRule):
+    # "" when shorewall applied the change; otherwise why it is saved but not live.
+    warning: str = ""
 
 
 # --------------------------------------------------------------------------- #
