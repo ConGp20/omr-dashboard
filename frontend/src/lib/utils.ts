@@ -18,6 +18,15 @@ export function mbps(bps: number): number {
   return bps / 1e6;
 }
 
+/** Format a byte count into GB/TB (decimal, as ISPs bill volume). */
+export function formatBytes(bytes: number): string {
+  if (!bytes || bytes < 1e6) return "0 MB";
+  const gb = bytes / 1e9;
+  if (gb >= 1000) return `${(gb / 1000).toFixed(2)} TB`;
+  if (gb >= 1) return `${gb.toFixed(2)} GB`;
+  return `${(bytes / 1e6).toFixed(0)} MB`;
+}
+
 const TYPE_LABELS: Record<string, string> = {
   fiber: "Glasfaser",
   dsl: "DSL",

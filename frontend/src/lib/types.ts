@@ -220,3 +220,88 @@ export interface ConfigMap {
   vps: ConfigMapItem[];
   sync: ConfigMapItem[];
 }
+
+export interface LinkUsage {
+  link_id: string;
+  label: string;
+  rx_bytes: number;
+  tx_bytes: number;
+  total_bytes: number;
+  cap_gb?: number | null;
+  warn_pct: number;
+  used_pct?: number | null;
+  over_warn: boolean;
+  over_cap: boolean;
+  projected_bytes: number;
+  projected_pct?: number | null;
+  projected_over_cap: boolean;
+}
+
+export interface UsageResponse {
+  month: string;
+  total_bytes: number;
+  links: LinkUsage[];
+  day_of_month: number;
+  days_in_month: number;
+}
+
+export interface AlertConfigPublic {
+  min_severity: "warn" | "error";
+  cooldown_minutes: number;
+  telegram_enabled: boolean;
+  telegram_chat_id?: string | null;
+  telegram_token_set: boolean;
+  webhook_enabled: boolean;
+  webhook_url?: string | null;
+  email_enabled: boolean;
+  smtp_host?: string | null;
+  smtp_port: number;
+  smtp_user?: string | null;
+  smtp_pass_set: boolean;
+  smtp_tls: boolean;
+  email_from?: string | null;
+  email_to?: string | null;
+}
+
+export interface AlertTestResult {
+  results: Record<string, string>;
+}
+
+export interface AuthStatus {
+  auth_required: boolean;
+  demo: boolean;
+  username: string;
+}
+
+export interface Finding {
+  id: string;
+  severity: "error" | "warn" | "info";
+  title: string;
+  detail: string;
+  action: string;
+  page?: string | null;
+  category: string;
+}
+
+export interface HealthReport {
+  findings: Finding[];
+  errors: number;
+  warnings: number;
+  infos: number;
+  checked: number;
+}
+
+export interface AuditEntry {
+  ts: number;
+  actor: string;
+  method: string;
+  path: string;
+  status: number;
+  client: string;
+}
+
+export interface RoutingOverview {
+  default_exit: string;
+  exit_vpn_enabled: boolean;
+  routes: { destination: string; via: string }[];
+}

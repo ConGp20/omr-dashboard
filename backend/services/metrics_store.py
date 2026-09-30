@@ -7,11 +7,13 @@ DB access runs in a thread executor so it never blocks the event loop.
 from __future__ import annotations
 
 import asyncio
+import calendar
+import contextlib
 import os
 import sqlite3
 import threading
 import time
-from typing import Optional
+from typing import Iterator, Optional
 
 from config import get_settings
 from schemas import Event, LinkStatus, MetricPoint
@@ -39,7 +41,52 @@ CREATE TABLE IF NOT EXISTS speedtest_results (
     link_id TEXT,
     rx_mbps REAL, tx_mbps REAL, server TEXT
 );
+
+CREATE TABLE IF NOT EXISTS monthly_usage (
+    month TEXT NOT NULL,          -- 'YYYY-MM' (UTC)
+    link_id TEXT NOT NULL,
+    rx_bytes REAL NOT NULL DEFAULT 0,
+    tx_bytes REAL NOT NULL DEFAULT 0,
+    PRIMARY KEY (month, link_id)
+);
+
+CREATE TABLE IF NOT EXISTS link_quota (
+    link_id TEXT PRIMARY KEY,
+    cap_gb REAL,                  -- monthly cap in GB; NULL = no limit
+    warn_pct INTEGER NOT NULL DEFAULT 80
+);
+
+CREATE TABLE IF NOT EXISTS audit_log (
+    ts INTEGER NOT NULL,
+    actor TEXT,
+    method TEXT NOT NULL,
+    path TEXT NOT NULL,
+    status INTEGER,
+    client TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
 """
+
+
+def current_month() -> str:
+    """The current accounting month as ``YYYY-MM`` in UTC."""
+    return time.strftime("%Y-%m", time.gmtime())
+
+
+def month_progress(now: Optional[float] = None) -> tuple[float, int, int]:
+    """How far into the current (UTC) month we are.
+
+    Returns ``(fraction, day_of_month, days_in_month)`` where fraction is in
+    (0, 1]. Used to project month-end volume from what has been used so far.
+    """
+    now = time.time() if now is None else now
+    tm = time.gmtime(now)
+    days_in_month = calendar.monthrange(tm.tm_year, tm.tm_mon)[1]
+    elapsed_days = (tm.tm_mday - 1) + (tm.tm_hour * 3600 + tm.tm_min * 60 + tm.tm_sec) / 86400
+    # Guard the very first instant of a month against a divide-by-zero and an
+    # absurd projection from a few seconds of traffic.
+    fraction = max(elapsed_days / days_in_month, 1e-6)
+    return fraction, tm.tm_mday, days_in_month
 
 _PERIOD_SECONDS = {
     "1h": 3600,
@@ -58,11 +105,34 @@ class MetricsStore:
         # ("cannot commit - no transaction is active" when a poller metrics
         # write races a state-change event write).
         self._lock = threading.Lock()
+        # Set by close(). Cancelling the poller task cannot stop work already
+        # running inside asyncio.to_thread, so a worker can still be mid-query
+        # when the app shuts down. Both accessors below check this under the
+        # lock; without it the connection is closed out from under a running
+        # query and the interpreter segfaults.
+        self._closed = False
         os.makedirs(self.settings.data_dir, exist_ok=True)
         self._conn = sqlite3.connect(self.settings.db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._conn.executescript(_SCHEMA)
         self._conn.commit()
+
+    # --- serialized access -------------------------------------------------
+    @contextlib.contextmanager
+    def _read(self) -> Iterator[Optional[sqlite3.Connection]]:
+        """Hold the lock for a read; yields None once the store is closed."""
+        with self._lock:
+            yield None if self._closed else self._conn
+
+    @contextlib.contextmanager
+    def _write(self) -> Iterator[Optional[sqlite3.Connection]]:
+        """Hold the lock for a write transaction; None once the store is closed."""
+        with self._lock:
+            if self._closed:
+                yield None
+                return
+            with self._conn:
+                yield self._conn
 
     # --- writes ------------------------------------------------------------
     async def record_links(self, links: list[LinkStatus]) -> None:
@@ -74,8 +144,10 @@ class MetricsStore:
         await asyncio.to_thread(self._insert_metrics, rows)
 
     def _insert_metrics(self, rows: list[tuple]) -> None:
-        with self._lock, self._conn:
-            self._conn.executemany(
+        with self._write() as conn:
+            if conn is None:
+                return
+            conn.executemany(
                 "INSERT INTO link_metrics (ts, link_id, rx_bps, tx_bps, latency_ms, packet_loss_pct)"
                 " VALUES (?, ?, ?, ?, ?, ?)",
                 rows,
@@ -85,23 +157,127 @@ class MetricsStore:
         await asyncio.to_thread(self._insert_event, event)
 
     def _insert_event(self, event: Event) -> None:
-        with self._lock, self._conn:
-            self._conn.execute(
+        with self._write() as conn:
+            if conn is None:
+                return
+            conn.execute(
                 "INSERT INTO events (ts, type, detail, severity) VALUES (?, ?, ?, ?)",
                 (event.ts, event.type, event.detail, event.severity),
             )
 
     async def add_speedtest(self, test_type: str, link_id: Optional[str], rx: float, tx: float, server: str) -> None:
         def _ins() -> None:
-            with self._lock, self._conn:
-                self._conn.execute(
+            with self._write() as conn:
+                if conn is None:
+                    return
+                conn.execute(
                     "INSERT INTO speedtest_results (ts, test_type, link_id, rx_mbps, tx_mbps, server)"
                     " VALUES (?, ?, ?, ?, ?, ?)",
                     (int(time.time()), test_type, link_id, rx, tx, server),
                 )
         await asyncio.to_thread(_ins)
 
+    async def add_usage(self, month: str, rows: list[tuple]) -> None:
+        """Accumulate per-link byte deltas into the month's running totals.
+
+        ``rows`` is ``[(link_id, rx_bytes, tx_bytes), ...]`` — the bytes seen in
+        one poll interval. UPSERT keeps a single row per link per month.
+        """
+        if not rows:
+            return
+        await asyncio.to_thread(self._add_usage, month, rows)
+
+    def _add_usage(self, month: str, rows: list[tuple]) -> None:
+        with self._write() as conn:
+            if conn is None:
+                return
+            conn.executemany(
+                "INSERT INTO monthly_usage (month, link_id, rx_bytes, tx_bytes)"
+                " VALUES (?, ?, ?, ?)"
+                " ON CONFLICT(month, link_id) DO UPDATE SET"
+                "   rx_bytes = rx_bytes + excluded.rx_bytes,"
+                "   tx_bytes = tx_bytes + excluded.tx_bytes",
+                [(month, lid, rx, tx) for (lid, rx, tx) in rows],
+            )
+
+    async def set_quota(self, link_id: str, cap_gb: Optional[float], warn_pct: int) -> None:
+        await asyncio.to_thread(self._set_quota, link_id, cap_gb, warn_pct)
+
+    def _set_quota(self, link_id: str, cap_gb: Optional[float], warn_pct: int) -> None:
+        with self._write() as conn:
+            if conn is None:
+                return
+            conn.execute(
+                "INSERT INTO link_quota (link_id, cap_gb, warn_pct) VALUES (?, ?, ?)"
+                " ON CONFLICT(link_id) DO UPDATE SET"
+                "   cap_gb = excluded.cap_gb, warn_pct = excluded.warn_pct",
+                (link_id, cap_gb, warn_pct),
+            )
+
+    async def add_audit(self, actor: str, method: str, path: str,
+                        status: int, client: str) -> None:
+        """Record one config-changing request.
+
+        Only the request line is stored — never bodies or query strings, which
+        would drag credentials into a table meant to be readable.
+        """
+        await asyncio.to_thread(self._add_audit, actor, method, path, status, client)
+
+    def _add_audit(self, actor: str, method: str, path: str,
+                   status: int, client: str) -> None:
+        with self._write() as conn:
+            if conn is None:
+                return
+            conn.execute(
+                "INSERT INTO audit_log (ts, actor, method, path, status, client)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (int(time.time()), actor, method, path, status, client),
+            )
+
     # --- reads -------------------------------------------------------------
+    async def audit(self, limit: int = 100) -> list[dict]:
+        rows = await asyncio.to_thread(self._audit, limit)
+        return [
+            {"ts": r[0], "actor": r[1], "method": r[2], "path": r[3],
+             "status": r[4], "client": r[5]}
+            for r in rows
+        ]
+
+    def _audit(self, limit: int) -> list[tuple]:
+        with self._read() as conn:
+            if conn is None:
+                return []
+            return conn.execute(
+                "SELECT ts, actor, method, path, status, client FROM audit_log"
+                " ORDER BY ts DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+
+    async def usage(self, month: str) -> dict[str, tuple]:
+        """Per-link accumulated ``(rx_bytes, tx_bytes)`` for ``month``."""
+        rows = await asyncio.to_thread(self._usage, month)
+        return {r[0]: (r[1], r[2]) for r in rows}
+
+    def _usage(self, month: str) -> list[tuple]:
+        with self._read() as conn:
+            if conn is None:
+                return []
+            return conn.execute(
+                "SELECT link_id, rx_bytes, tx_bytes FROM monthly_usage"
+                " WHERE month = ? ORDER BY link_id",
+                (month,),
+            ).fetchall()
+
+    async def quotas(self) -> dict[str, dict]:
+        rows = await asyncio.to_thread(self._quotas)
+        return {r[0]: {"cap_gb": r[1], "warn_pct": r[2]} for r in rows}
+
+    def _quotas(self) -> list[tuple]:
+        with self._read() as conn:
+            if conn is None:
+                return []
+            return conn.execute("SELECT link_id, cap_gb, warn_pct FROM link_quota").fetchall()
+
     async def metrics(self, period: str) -> list[MetricPoint]:
         window = _PERIOD_SECONDS.get(period, 3600)
         since = int(time.time()) - window
@@ -117,37 +293,40 @@ class MetricsStore:
         ]
 
     def _select_metrics(self, since: int, bucket: int) -> list[tuple]:
-        with self._lock:
-            cur = self._conn.execute(
+        with self._read() as conn:
+            if conn is None:
+                return []
+            return conn.execute(
                 "SELECT (ts/?)*? AS bucket, link_id,"
                 "       AVG(rx_bps), AVG(tx_bps), AVG(latency_ms), AVG(packet_loss_pct)"
                 "  FROM link_metrics WHERE ts >= ?"
                 " GROUP BY bucket, link_id ORDER BY bucket ASC",
                 (bucket, bucket, since),
-            )
-            return cur.fetchall()
+            ).fetchall()
 
     async def events(self, limit: int = 50) -> list[Event]:
         rows = await asyncio.to_thread(self._select_events, limit)
         return [Event(ts=r[0], type=r[1], detail=r[2] or "", severity=r[3] or "info") for r in rows]
 
     def _select_events(self, limit: int) -> list[tuple]:
-        with self._lock:
-            cur = self._conn.execute(
+        with self._read() as conn:
+            if conn is None:
+                return []
+            return conn.execute(
                 "SELECT ts, type, detail, severity FROM events ORDER BY ts DESC LIMIT ?",
                 (limit,),
-            )
-            return cur.fetchall()
+            ).fetchall()
 
     async def speedtests(self, limit: int = 20) -> list[dict]:
         def _sel() -> list[tuple]:
-            with self._lock:
-                cur = self._conn.execute(
+            with self._read() as conn:
+                if conn is None:
+                    return []
+                return conn.execute(
                     "SELECT ts, test_type, link_id, rx_mbps, tx_mbps, server"
                     " FROM speedtest_results ORDER BY ts DESC LIMIT ?",
                     (limit,),
-                )
-                return cur.fetchall()
+                ).fetchall()
         rows = await asyncio.to_thread(_sel)
         return [
             {"ts": r[0], "test_type": r[1], "link_id": r[2], "rx_mbps": r[3], "tx_mbps": r[4], "server": r[5]}
@@ -160,9 +339,28 @@ class MetricsStore:
         await asyncio.to_thread(self._prune, cutoff)
 
     def _prune(self, cutoff: int) -> None:
-        with self._lock, self._conn:
-            self._conn.execute("DELETE FROM link_metrics WHERE ts < ?", (cutoff,))
-            self._conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+        # Keep monthly usage far longer than the high-resolution metrics so the
+        # volume history survives — only drop months older than ~13 months.
+        usage_cutoff = time.strftime("%Y-%m", time.gmtime(time.time() - 396 * 86400))
+        with self._write() as conn:
+            if conn is None:
+                return
+            conn.execute("DELETE FROM link_metrics WHERE ts < ?", (cutoff,))
+            conn.execute("DELETE FROM events WHERE ts < ?", (cutoff,))
+            conn.execute("DELETE FROM monthly_usage WHERE month < ?", (usage_cutoff,))
+            # The audit trail outlives both — "who changed this" is worth
+            # keeping a year, and the rows are tiny.
+            conn.execute("DELETE FROM audit_log WHERE ts < ?",
+                         (int(time.time()) - 365 * 86400,))
 
     def close(self) -> None:
-        self._conn.close()
+        """Close the connection, waiting for any in-flight query to finish.
+
+        Taking the lock is what makes shutdown safe: a poller thread may still
+        be inside a query, and closing under it would crash the interpreter.
+        """
+        with self._lock:
+            if self._closed:
+                return
+            self._closed = True
+            self._conn.close()

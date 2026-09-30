@@ -2,7 +2,10 @@
 FROM node:20-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
-RUN npm ci
+# npm can crash ("Exit handler never called!") yet still exit 0, leaving a
+# half-installed tree that only fails later as a cryptic "next: not found".
+# Fail here, at the step that actually broke.
+RUN npm ci && test -x node_modules/.bin/next
 
 # --- build ---
 FROM node:20-alpine AS build

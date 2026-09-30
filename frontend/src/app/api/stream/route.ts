@@ -2,7 +2,7 @@
 // Uses a push-based ReadableStream (continuous read loop in start) which is the
 // reliable pattern for proxying event streams through Next.js route handlers.
 import { NextRequest } from "next/server";
-import { BACKEND } from "@/lib/backend";
+import { BACKEND, authHeaders } from "@/lib/backend";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -12,7 +12,7 @@ export async function GET(req: NextRequest) {
   let upstream: Response;
   try {
     upstream = await fetch(`${BACKEND}/dashboard/stream`, {
-      headers: { Accept: "text/event-stream" },
+      headers: { Accept: "text/event-stream", ...authHeaders(req) },
       cache: "no-store",
     });
   } catch {

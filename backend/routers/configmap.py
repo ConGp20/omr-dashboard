@@ -40,6 +40,10 @@ CONFIG_MAP = {
          "description": "Optionaler VPN-Ausgang hinter dem VPS."},
         {"key": "nat", "label": "NAT / Masquerading", "page": "/vps",
          "description": "Adressübersetzung am VPS-Ausgang."},
+        {"key": "data_quotas", "label": "Datenlimits pro WAN", "page": "/usage",
+         "description": "Monatsvolumen und Warnschwelle — im Dashboard auf dem VPS gespeichert."},
+        {"key": "alerts", "label": "Alarm-Kanäle", "page": "/alerts",
+         "description": "Telegram/Webhook/E-Mail-Benachrichtigungen, verschlüsselt auf dem VPS."},
     ],
     "sync": [
         {"key": "tunnel_keys", "label": "Tunnel-Schlüssel/-Passwörter",

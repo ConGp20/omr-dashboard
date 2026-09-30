@@ -12,6 +12,10 @@ services:
     build: ./backend
     image: omr-dashboard-backend:latest
     network_mode: host
+    # Needed so `shorewall restart` inside the container can program the
+    # host's iptables (host network namespace + NET_ADMIN).
+    cap_add:
+      - NET_ADMIN
     environment:
       OMR_DASHBOARD_DEMO: "${OMR_DASHBOARD_DEMO:-false}"
       OMR_DASHBOARD_OMR_ADMIN_URL: "https://127.0.0.1:65500"
@@ -19,7 +23,9 @@ services:
       OMR_DASHBOARD_ROUTER_IP: "${ROUTER_IP:-192.168.100.1}"
       OMR_DASHBOARD_ROUTER_USER: "${ROUTER_USER:-root}"
       OMR_DASHBOARD_ROUTER_PASS: "${ROUTER_PASS:-}"
-      OMR_DASHBOARD_JWT_SECRET: "${JWT_SECRET:-change-me}"
+      # Fallback matches the backend's known placeholder, so the system check
+      # flags a missing JWT_SECRET instead of it slipping through unnoticed.
+      OMR_DASHBOARD_JWT_SECRET: "${JWT_SECRET:-change-me-in-production}"
       OMR_DASHBOARD_DASHBOARD_PASS: "${DASHBOARD_PASS:-}"
     command: >
       uvicorn omr_dashboard_api:app --host 127.0.0.1 --port 65501

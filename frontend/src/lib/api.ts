@@ -8,6 +8,14 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     ...init,
   });
   if (!res.ok) {
+    // Session expired or missing: send the user to the login screen instead of
+    // rendering a wall of "Not authenticated" errors on every panel.
+    if (res.status === 401 && typeof window !== "undefined") {
+      const next = encodeURIComponent(window.location.pathname);
+      if (!window.location.pathname.startsWith("/login")) {
+        window.location.href = `/login?next=${next}`;
+      }
+    }
     let detail = res.statusText;
     try {
       detail = (await res.json()).detail ?? detail;

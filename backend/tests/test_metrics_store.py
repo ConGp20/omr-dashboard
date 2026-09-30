@@ -44,3 +44,40 @@ def test_concurrent_writes_are_serialized():
     store.close()
 
     assert not errors, f"concurrent writes raised: {errors!r}"
+
+
+def test_close_races_with_in_flight_queries():
+    """close() must not pull the connection out from under a running query.
+
+    Cancelling the poller task cannot stop work already inside
+    asyncio.to_thread, so a worker can still be querying at shutdown. Before
+    close() took the lock this segfaulted the interpreter; now the late calls
+    have to degrade to no-ops instead.
+    """
+    store = MetricsStore()
+    errors: list[Exception] = []
+    stop = threading.Event()
+
+    def hammer() -> None:
+        try:
+            while not stop.is_set():
+                store._quotas()
+                store._usage("2099-01")
+                store._insert_event(Event(ts=1, type="t", detail="d", severity="info"))
+        except Exception as exc:  # noqa: BLE001
+            errors.append(exc)
+
+    threads = [threading.Thread(target=hammer) for _ in range(4)]
+    for t in threads:
+        t.start()
+    time.sleep(0.05)
+    store.close()          # mid-flight, exactly as the app shutdown does it
+    stop.set()
+    for t in threads:
+        t.join(timeout=5)
+
+    assert not errors, f"queries racing close() raised: {errors!r}"
+    # Calls after close degrade quietly rather than touching a dead connection.
+    assert store._quotas() == []
+    assert store._usage("2099-01") == []
+    store.close()          # idempotent

@@ -1,0 +1,13 @@
+# Sources only: no local virtualenvs, caches, or dashboard data (the SQLite
+# store and encrypted settings/keys must never be baked into an image).
+.venv
+venv
+__pycache__
+**/__pycache__
+*.pyc
+.pytest_cache
+*.db
+*.enc
+*.key
+.env*
+.git

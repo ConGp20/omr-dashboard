@@ -1,6 +1,6 @@
 "use client";
 import { useState } from "react";
-import { Plus, Trash2, Server, Shield, Network, Globe } from "lucide-react";
+import { Plus, Trash2, Server, Shield, Network, Globe, Route } from "lucide-react";
 import { PageHeader } from "@/components/PageHeader";
 import { OwnerBadge } from "@/components/OwnerBadge";
 import {
@@ -9,7 +9,7 @@ import {
 } from "@/components/ui/primitives";
 import { useApi } from "@/hooks/useApi";
 import { api } from "@/lib/api";
-import type { PortForward, ExitVpn, NatStatus, TopologyHost } from "@/lib/types";
+import type { PortForward, ExitVpn, NatStatus, RoutingOverview, TopologyHost } from "@/lib/types";
 
 const EMPTY_FORWARD: PortForward = {
   description: "", proto: "tcp", src_port: 0, dest_ip: "", dest_port: 0, enabled: true,
@@ -30,12 +30,28 @@ function PortForwardSection() {
 
   const FIREWALL_PRESET = { label: "Firewall/VPN Durchleitung", port: 1194, proto: "udp" as const };
 
+  // Write endpoints answer "" when shorewall applied the change, otherwise the
+  // reason it is saved but not live — that must be shown, never swallowed.
+  const [notice, setNotice] = useState<string | null>(null);
+  const run = async (action: () => Promise<{ warning?: string } | undefined>, ok: string) => {
+    try {
+      const res = await action();
+      setNotice(res?.warning || ok);
+      return true;
+    } catch (e) {
+      setNotice(`Fehler: ${(e as Error).message}`);
+      return false;
+    } finally {
+      refetch();
+    }
+  };
+
   const add = async () => {
-    await api.post("/vps/portforward", form);
-    setAdding(false);
-    setAdvanced(false);
-    setForm(EMPTY_FORWARD);
-    refetch();
+    if (await run(() => api.post<{ warning?: string }>("/vps/portforward", form), "Weiterleitung angelegt.")) {
+      setAdding(false);
+      setAdvanced(false);
+      setForm(EMPTY_FORWARD);
+    }
   };
 
   const addExtraTarget = () =>
@@ -47,14 +63,11 @@ function PortForwardSection() {
     }));
   const removeExtraTarget = (i: number) =>
     setForm((f) => ({ ...f, extra_targets: f.extra_targets.filter((_, idx) => idx !== i) }));
-  const toggle = async (pf: PortForward) => {
-    await api.put(`/vps/portforward/${pf.id}`, { ...pf, enabled: !pf.enabled });
-    refetch();
-  };
-  const remove = async (id: string) => {
-    await api.del(`/vps/portforward/${id}`);
-    refetch();
-  };
+  const toggle = (pf: PortForward) =>
+    run(() => api.put<{ warning?: string }>(`/vps/portforward/${pf.id}`, { ...pf, enabled: !pf.enabled }),
+        pf.enabled ? "Weiterleitung deaktiviert." : "Weiterleitung aktiviert.");
+  const remove = (id: string) =>
+    run(() => api.del<{ warning?: string }>(`/vps/portforward/${id}`), "Weiterleitung entfernt.");
 
   return (
     <Card>
@@ -67,6 +80,12 @@ function PortForwardSection() {
         </Button>
       </CardHeader>
       <CardContent className="space-y-2">
+        {notice && (
+          <div className={`rounded-lg border px-3 py-2 text-sm ${
+            notice.startsWith("Gespeichert, aber nicht aktiv") || notice.startsWith("Fehler")
+              ? "border-warn/40 bg-warn/10 text-fg"
+              : "border-border bg-surface-2 text-fg"}`}>{notice}</div>
+        )}
         <p className="text-xs text-muted">
           Leite Ports von der öffentlichen VPS-IP an Geräte im LAN weiter — z. B. um
           die VPN-Funktion deiner eigenen Firewall von außen erreichbar zu machen
@@ -309,6 +328,37 @@ function NatSection() {
   );
 }
 
+function RoutingSection() {
+  const { data } = useApi<RoutingOverview>("/vps/routing");
+  if (!data) return null;
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <Route size={16} /> Routing-Übersicht <OwnerBadge owner="vps" />
+        </CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-2 text-sm">
+        <div className="flex justify-between">
+          <span className="text-muted">Standard-Ausgang</span>
+          <Badge tone={data.exit_vpn_enabled ? "primary" : "good"}>
+            {data.exit_vpn_enabled ? "Exit-VPN" : "Direkt ins Internet"}
+          </Badge>
+        </div>
+        {data.routes.map((r) => (
+          <div key={r.destination} className="flex justify-between rounded-lg border border-border p-2">
+            <span className="tabular text-fg">{r.destination}</span>
+            <span className="text-xs text-muted">über {r.via}</span>
+          </div>
+        ))}
+        <p className="text-xs text-muted">
+          So verlässt der Verkehr den VPS. Den Ausgang änderst Du oben unter „Exit-VPN“.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function VpsPage() {
   return (
     <div>
@@ -321,6 +371,7 @@ export default function VpsPage() {
         <div className="lg:col-span-2"><PortForwardSection /></div>
         <ExitVpnSection />
         <NatSection />
+        <RoutingSection />
       </div>
     </div>
   );

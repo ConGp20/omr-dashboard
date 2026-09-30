@@ -16,11 +16,13 @@ from fastapi.middleware.cors import CORSMiddleware
 import deps
 from config import get_settings
 from routers import (
+    alerts,
     auth_router,
     configmap,
     diagnostics,
     dns,
     firewall,
+    health,
     links,
     metrics,
     protocols,
@@ -31,6 +33,7 @@ from routers import (
     vps,
     wizard,
 )
+from services import audit
 from services.aggregator import Aggregator
 from services.metrics_store import MetricsStore
 
@@ -68,6 +71,10 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Records every configuration change; see services/audit.py for why this is
+    # middleware rather than per-endpoint calls.
+    app.middleware("http")(audit.middleware)
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],  # dashboard is reached over the management tunnel only
@@ -90,9 +97,13 @@ def create_app() -> FastAPI:
     app.include_router(configmap.router)
     app.include_router(wizard.router)
     app.include_router(settings_router.router)
+    app.include_router(alerts.router)
+    app.include_router(health.router)
 
+    # Named distinctly from the `health` router module imported above, which it
+    # would otherwise shadow inside this function's scope.
     @app.get("/health", tags=["meta"])
-    async def health() -> dict:
+    async def health_probe() -> dict:
         return {"status": "ok", "demo": settings.demo, "version": "1.0.0"}
 
     return app

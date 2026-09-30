@@ -15,12 +15,24 @@ service, and aggregates everything (VPS + router) into one clean UI:
   through the VPS), exit-VPN, QoS profiles, domain routing, DNS, diagnostics.
 - **Config-ownership map** — see exactly which setting lives on the router,
   which on the VPS, and what is auto-synced.
+- **Monthly data tracking** — per-WAN volume read from the router's interface
+  counters, with a monthly cap, warning threshold, and a month-end projection
+  that flags an overrun before it happens.
+- **System check** — non-blocking advice: misconfiguration hints (public bind
+  address, placeholder session secret, missing caps on metered links), plus
+  recommendations with the concrete setting to change and a link straight to it.
+  Nothing it reports ever blocks an action.
+- **Alerts** — Telegram, webhook or e-mail when a line drops, the bond goes
+  offline, or a data cap is reached. Repeat-suppression keeps a flapping link
+  from flooding your inbox.
 - **Encrypted backup/restore** — bundle the whole config into one file and bring
   it back in ~2 minutes. Perfect for occasional/event-based bonding.
 
 > The underlying OMR technology is unchanged — this is purely a usability layer
 > on top of the existing APIs. LuCI remains available.
 
+> 🧪 **Erster Test auf echter Hardware:** [`docs/erster-test.de.md`](docs/erster-test.de.md)
+>
 > 📖 **Ausführliche deutsche Installationsanleitung:** [`INSTALL.de.md`](INSTALL.de.md)
 > — Schritt für Schritt vom Demo-Test bis zum Live-Betrieb auf dem VPS, inkl.
 > Wizard-Walkthrough, Tunnel-Zugriff und Fehlersuche.
@@ -50,18 +62,35 @@ cd frontend && npm install
 BACKEND_URL=http://127.0.0.1:8000 npm run dev
 ```
 
-## Production (on the VPS)
+## Production (on an existing OMR VPS)
+
+The dashboard is a **self-contained sidecar**: it installs *next to* a working
+OpenMPTCProuter VPS without modifying the OMR installation. Easiest path — run
+the bundled installer on the VPS:
 
 ```bash
-cd dashboard
+git clone https://github.com/ConGp20/omr-dashboard.git /opt/omr-dashboard
+cd /opt/omr-dashboard
+./install.sh --bind 10.255.247.1      # bind to your WireGuard tunnel IP
+```
+
+`install.sh` auto-detects the `omr-admin` server key from the existing
+`omr-admin-config.json`, writes `.env`, installs Docker if needed, and starts
+the stack. Run `./install.sh --help` for all flags (`--router-pass`, `--demo`,
+`--no-start`, …). Nothing in the OMR install is changed.
+
+Or do it by hand:
+
+```bash
 cp .env.example .env       # set OMR_ADMIN_KEY, ROUTER_PASS, BIND_ADDR, JWT_SECRET
 docker compose up -d --build
 ```
 
 Then reach it **through the router** at `http://<BIND_ADDR>:3000` (see Security).
 
-The VPS install script can also do this for you with `DASHBOARD=yes` — it writes
-`.env` from the generated config and starts the stack.
+For a **fresh** VPS, the OMR VPS install script can also pull the dashboard in
+with `DASHBOARD=yes` — it git-clones this repo, writes `.env` from the generated
+config, and starts the stack.
 
 ---
 
@@ -102,7 +131,7 @@ reach it via an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 root@<vps>`.
 
 ```bash
 cd backend && . .venv/bin/activate
-pytest                      # 30 tests, all green in demo mode
+pytest                      # 155 tests, all green (demo + real-mode units)
 
 cd ../frontend && npm run build    # type-checks + builds all routes
 ```
