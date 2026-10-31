@@ -1,0 +1,9 @@
+# Keep the build context to sources only. Without this, `COPY . .` drags a
+# developer's local node_modules (native binaries built for glibc, not the
+# alpine/musl image) and a stale .next build into the image — and can mask a
+# broken `npm ci` in the deps stage.
+node_modules
+.next
+npm-debug.log*
+.env*
+.git

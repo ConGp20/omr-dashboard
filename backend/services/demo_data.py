@@ -23,9 +23,12 @@ _START = time.time()
 
 # Configured demo links. Capacities are in bits/s.
 _LINKS = [
-    {"id": "wan", "label": "Fiber DSL", "type": LinkType.fiber, "cap_rx": 95e6, "cap_tx": 40e6, "base_lat": 8.0},
-    {"id": "wan2", "label": "LTE Telekom", "type": LinkType.lte, "cap_rx": 45e6, "cap_tx": 20e6, "base_lat": 24.0},
-    {"id": "wan3", "label": "5G Vodafone", "type": LinkType.fiveg, "cap_rx": 60e6, "cap_tx": 25e6, "base_lat": 18.0},
+    {"id": "wan", "label": "Fiber DSL", "type": LinkType.fiber, "device": "eth0.2",
+     "cap_rx": 95e6, "cap_tx": 40e6, "base_lat": 8.0},
+    {"id": "wan2", "label": "LTE Telekom", "type": LinkType.lte, "device": "wwan0",
+     "cap_rx": 45e6, "cap_tx": 20e6, "base_lat": 24.0},
+    {"id": "wan3", "label": "5G Vodafone", "type": LinkType.fiveg, "device": "wwan1",
+     "cap_rx": 60e6, "cap_tx": 25e6, "base_lat": 18.0},
 ]
 
 # Mutable per-link admin state (toggled via the API in demo mode).
@@ -54,6 +57,7 @@ def link_status() -> list[LinkStatus]:
                     state=LinkState.disabled,
                     enabled=False,
                     priority=st["priority"],
+                    device=link["device"],
                 )
             )
             continue
@@ -78,6 +82,7 @@ def link_status() -> list[LinkStatus]:
                 state=state,
                 enabled=True,
                 priority=st["priority"],
+                device=link["device"],
                 ip=f"203.0.113.{idx + 5}",
                 rx_bps=rx,
                 tx_bps=tx,
@@ -125,6 +130,24 @@ def dashboard_status() -> DashboardStatus:
         exit_vpn=None,
         timestamp=time.time(),
     )
+
+
+def device_counters() -> dict[str, tuple[float, float]]:
+    """Synthetic cumulative interface byte counters, mirroring ``link_status``.
+
+    Monotonically increasing with elapsed runtime so the usage collector sees
+    realistic, ever-growing counters (as a real kernel would report).
+    """
+    elapsed = max(0.0, time.time() - _START)
+    out: dict[str, tuple[float, float]] = {}
+    for idx, link in enumerate(_LINKS):
+        if not _state[link["id"]]["enabled"]:
+            continue
+        # ~55% average utilisation, converted from bits/s to bytes.
+        rx = link["cap_rx"] * 0.55 * elapsed / 8.0
+        tx = link["cap_tx"] * 0.38 * elapsed / 8.0
+        out[link["device"]] = (rx + idx * 1e6, tx + idx * 5e5)
+    return out
 
 
 def set_link(link_id: str, *, enabled=None, label=None, priority=None, type=None) -> None:

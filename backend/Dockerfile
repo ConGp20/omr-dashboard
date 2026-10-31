@@ -2,9 +2,12 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Runtime tools used by diagnostics (ping, traceroute) and shorewall control.
+# Runtime tools: ping/traceroute for diagnostics, and shorewall so firewall
+# changes written to the host-mounted /etc/shorewall can actually be applied.
+# Requires network_mode: host + cap NET_ADMIN (see docker-compose.yml) so the
+# reload manipulates the host's iptables, not an empty container namespace.
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends iputils-ping traceroute \
+    && apt-get install -y --no-install-recommends iputils-ping traceroute shorewall \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .

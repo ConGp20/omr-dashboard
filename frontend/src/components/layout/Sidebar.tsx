@@ -2,10 +2,12 @@
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { Moon, Sun, Menu, X, Network, Compass, Search } from "lucide-react";
+import { Moon, Sun, Menu, X, Network, Compass, Search, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 import { useDashboardStore } from "@/lib/store";
 import { NAV } from "@/lib/nav";
+import type { AuthStatus } from "@/lib/types";
 import { requestTour } from "@/components/onboarding/OnboardingTour";
 import { openCommandPalette } from "@/components/CommandPalette";
 
@@ -55,6 +57,46 @@ function ThemeToggle() {
     >
       {dark ? <Sun size={16} /> : <Moon size={16} />}
       {dark ? "Hell" : "Dunkel"}
+    </button>
+  );
+}
+
+function LogoutButton() {
+  const router = useRouter();
+  const [required, setRequired] = useState(false);
+  const [user, setUser] = useState<string | null>(null);
+
+  // Only offer sign-out when a login is actually in play — in demo mode and on
+  // a passwordless fresh install there is no session to end.
+  useEffect(() => {
+    api.get<AuthStatus>("/auth/status")
+      .then((s) => {
+        setRequired(s.auth_required);
+        if (s.auth_required) {
+          api.get<{ user: string }>("/auth/me")
+            .then((m) => setUser(m.user))
+            .catch(() => setUser(null));
+        }
+      })
+      .catch(() => setRequired(false));
+  }, []);
+
+  if (!required) return null;
+
+  const logout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    router.replace("/login");
+    router.refresh();
+  };
+
+  return (
+    <button
+      onClick={logout}
+      className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-muted hover:bg-surface-2"
+      title={user ? `Angemeldet als ${user}` : undefined}
+    >
+      <LogOut size={16} />
+      <span className="truncate">{user ? `Abmelden (${user})` : "Abmelden"}</span>
     </button>
   );
 }
@@ -134,6 +176,7 @@ export function Sidebar() {
         <div className="border-t border-border p-2">
           <RestartTourButton />
           <ThemeToggle />
+          <LogoutButton />
         </div>
       </aside>
 

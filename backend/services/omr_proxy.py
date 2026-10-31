@@ -65,6 +65,44 @@ PROTOCOL_META: dict[str, dict[str, Any]] = {
 }
 
 
+# Protocols whose tunnel runs as a "VPN" vs. as a "proxy" in OMR terms.
+VPN_PROTOCOLS = frozenset({"glorytun_tcp", "glorytun_udp", "wireguard", "openvpn", "mlvpn"})
+PROXY_PROTOCOLS = frozenset({"shadowsocks", "v2ray", "xray"})
+
+
+def build_key_directives(protocol: str, secrets: dict, vps_ip: str) -> list[dict]:
+    """Map VPS tunnel secrets to explicit router UCI directives.
+
+    Only protocols with a single, well-known UCI target are written directly
+    (targets verified against the upstream LuCI wizard,
+    ``luci-app-openmptcprouter/.../wizard.js``). Protocols whose keys the
+    router fetches itself from the VPS (glorytun, wireguard, openvpn, mlvpn)
+    instead rely on ``openmptcprouter.settings.forceretrieve`` — see
+    ``routers/wizard.py``. Each directive is
+    ``{"config", "section", "values", "label"}``.
+    """
+    out: list[dict] = []
+    if protocol == "shadowsocks" and secrets.get("shadowsocks_key"):
+        out.append({
+            "config": "shadowsocks-libev", "section": "sss0",
+            "values": {"key": secrets["shadowsocks_key"], "server": vps_ip},
+            "label": "Shadowsocks-Schlüssel",
+        })
+    elif protocol == "v2ray" and secrets.get("v2ray_user"):
+        out.append({
+            "config": "v2ray", "section": "omrout",
+            "values": {"s_vmess_user_id": secrets["v2ray_user"]},
+            "label": "V2Ray-User-ID",
+        })
+    elif protocol == "xray" and secrets.get("xray_user"):
+        out.append({
+            "config": "xray", "section": "omrout",
+            "values": {"s_vmess_user_id": secrets["xray_user"]},
+            "label": "Xray-User-ID",
+        })
+    return out
+
+
 class OmrProxy:
     def __init__(self) -> None:
         self.settings = get_settings()
@@ -182,3 +220,46 @@ class OmrProxy:
                 return json.load(fh)
         except (OSError, json.JSONDecodeError):
             return {}
+
+    async def tunnel_secrets(self) -> dict:
+        """Read the per-protocol tunnel secrets from the VPS omr-admin config.
+
+        The dashboard backend runs as a sidecar on the VPS, so the omr-admin
+        config file is the local source of truth. The keys live under
+        ``users[0].openmptcprouter.*`` (see the upstream install script). Only
+        fields that are actually present are returned — anything missing the
+        router pulls itself from the VPS via ``forceretrieve`` (see
+        ``routers/wizard.py``).
+        """
+        if self.settings.demo:
+            return {
+                "user_password": "demo-omr-user-pass",
+                "shadowsocks_key": "demo-ss-Zm9vYmFyMTIzNDU2",
+                "glorytun_key": "demo-glorytun-00112233445566778899aabbccddeeff",
+                "v2ray_user": "demo-7f3c2a10-0000-4000-8000-000000000000",
+                "xray_user": "demo-9a1b2c30-0000-4000-8000-000000000000",
+            }
+        cfg = self.read_admin_config()
+        users = cfg.get("users") if isinstance(cfg, dict) else None
+        user: dict = {}
+        if isinstance(users, list) and users and isinstance(users[0], dict):
+            first = users[0]
+            sub = first.get("openmptcprouter")
+            user = sub if isinstance(sub, dict) else first
+
+        def pick(*names: str):
+            for name in names:
+                value = user.get(name)
+                if value:
+                    return value
+            return None
+
+        wanted = {
+            "user_password": ("user_password", "password"),
+            "shadowsocks_key": ("shadowsocks_key",),
+            "glorytun_key": ("glorytun_key",),
+            "v2ray_user": ("v2ray_user", "vmess_user_id"),
+            "xray_user": ("xray_user",),
+            "mlvpn_password": ("mlvpn_password",),
+        }
+        return {field: pick(*names) for field, names in wanted.items() if pick(*names)}

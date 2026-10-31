@@ -5,6 +5,21 @@ import { NextRequest, NextResponse } from "next/server";
 
 const BACKEND = process.env.BACKEND_URL || "http://127.0.0.1:8000";
 
+/** Name of the httpOnly cookie holding the backend session token. */
+export const SESSION_COOKIE = "omr_session";
+
+/**
+ * Authorization header for the backend, taken from the session cookie.
+ *
+ * The token lives in an httpOnly cookie, so it is attached here on the server
+ * and never becomes readable by browser JavaScript — the same reason the admin
+ * key never leaves this process.
+ */
+export function authHeaders(req: NextRequest): Record<string, string> {
+  const token = req.cookies.get(SESSION_COOKIE)?.value;
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
 export async function proxy(
   req: NextRequest,
   backendPath: string,
@@ -12,7 +27,7 @@ export async function proxy(
   const search = req.nextUrl.search || "";
   const url = `${BACKEND}${backendPath}${search}`;
 
-  const init: RequestInit = { method: req.method, headers: {} };
+  const init: RequestInit = { method: req.method, headers: { ...authHeaders(req) } };
   const ct = req.headers.get("content-type");
   if (ct) (init.headers as Record<string, string>)["content-type"] = ct;
 

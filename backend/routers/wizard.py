@@ -22,7 +22,7 @@ from schemas import (
     WizardDetectWans,
 )
 from services import backup_service
-from services.omr_proxy import PROTOCOL_META, OmrProxy
+from services.omr_proxy import PROTOCOL_META, OmrProxy, build_key_directives
 from services.router_proxy import RouterProxy
 
 router = APIRouter(prefix="/wizard", tags=["wizard"])
@@ -87,17 +87,13 @@ async def apply(payload: WizardApply, _: str = Depends(require_user)) -> WizardA
         steps.append(WizardApplyStep(step="VPS: Protokoll aktivieren", ok=ok,
                                      detail=payload.protocol))
 
-    # Step 2: push config to router (VPS IP, keys, WAN labels)
+    # Step 2: push config to router (VPS IP, tunnel keys, WAN labels)
     rp = RouterProxy(payload.router_ip, payload.router_user, payload.router_pass)
     if settings.demo:
         steps.append(WizardApplyStep(step="Router: VPS-IP & Schlüssel übertragen", ok=True,
-                                     detail="Auto-Sync abgeschlossen"))
+                                     detail="Server-Eintrag + Schlüssel synchronisiert (Demo)"))
     else:
-        ok_vps = await rp.uci_set("openmptcprouter", "vps", {"ip": payload.vps_ip})
-        for wan in payload.wans:
-            await rp.uci_set("openmptcprouter", wan.id, {"name": wan.label or wan.id})
-        await rp.uci_commit("openmptcprouter")
-        steps.append(WizardApplyStep(step="Router: VPS-IP & WAN-Labels übertragen", ok=ok_vps))
+        steps.append(await _push_router_config(rp, payload))
 
     # Step 3: wait for tunnel
     tunnel_up = await _wait_for_tunnel(timeout=30 if not settings.demo else 1)
@@ -124,6 +120,60 @@ async def apply(payload: WizardApply, _: str = Depends(require_user)) -> WizardA
     return WizardApplyResult(
         success=all(s.ok for s in steps), steps=steps,
         download_mbps=download, upload_mbps=upload)
+
+
+async def _push_router_config(rp: RouterProxy, payload: WizardApply) -> WizardApplyStep:
+    """Transfer the VPS server entry and tunnel keys to the router (real mode).
+
+    Mirrors OMR's own mechanism: give the router the VPS server entry (IP +
+    the admin credential it uses to call the VPS API) and set ``forceretrieve``
+    so it pulls every per-protocol key from the VPS. Keys with a single,
+    well-known UCI target are additionally written directly so the chosen
+    protocol takes effect immediately without waiting for a full retrieve.
+    """
+    secrets = await OmrProxy().tunnel_secrets()
+    touched: set[str] = {"openmptcprouter"}
+    ok = True
+
+    # 1) VPS server entry — IP + credential the router uses to reach the VPS API.
+    server_values = {
+        "ip": payload.vps_ip,
+        "username": "openmptcprouter",
+        "port": "65500",
+        "master": "1",
+    }
+    if secrets.get("user_password"):
+        server_values["password"] = secrets["user_password"]
+    ok = await rp.uci_set("openmptcprouter", "vps", server_values) and ok
+
+    # 2) Make the router pull all per-protocol keys from the VPS; for
+    #    MPTCP-over-VPN protocols also select the carrier.
+    settings_values = {"forceretrieve": "1"}
+    if payload.protocol == "wireguard":
+        settings_values["mptcpovervpn"] = "wireguard"
+    ok = await rp.uci_set("openmptcprouter", "settings", settings_values) and ok
+
+    # 3) Explicit single-target keys (shadowsocks / v2ray / xray).
+    applied: list[str] = []
+    for directive in build_key_directives(payload.protocol, secrets, payload.vps_ip):
+        if await rp.uci_set(directive["config"], directive["section"], directive["values"]):
+            applied.append(directive["label"])
+            touched.add(directive["config"])
+        else:
+            ok = False
+
+    # 4) WAN labels.
+    for wan in payload.wans:
+        await rp.uci_set("openmptcprouter", wan.id, {"name": wan.label or wan.id})
+
+    # 5) Commit every config we touched.
+    for config in touched:
+        await rp.uci_commit(config)
+
+    detail = "Server-Eintrag + Auto-Retrieve"
+    if applied:
+        detail += " + " + ", ".join(applied)
+    return WizardApplyStep(step="Router: VPS-IP & Schlüssel übertragen", ok=ok, detail=detail)
 
 
 async def _wait_for_tunnel(timeout: int) -> bool:
