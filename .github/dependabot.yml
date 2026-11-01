@@ -1,0 +1,30 @@
+# Weekly dependency updates with grouped PRs, so CI catches new CVEs and
+# compatible upgrades without anyone having to remember to run an audit.
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /backend
+    schedule: { interval: weekly }
+    groups:
+      python-deps: { patterns: ["*"] }
+
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule: { interval: weekly }
+    groups:
+      # Patch/minor together; majors (React 19, recharts 3, ...) stay separate
+      # so the deliberate migration decision is visible.
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+
+  - package-ecosystem: docker
+    directory: /backend
+    schedule: { interval: weekly }
+  - package-ecosystem: docker
+    directory: /frontend
+    schedule: { interval: weekly }
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }

@@ -33,3 +33,16 @@ async def delete_rule(rule_id: str, _: str = Depends(require_user)) -> dict:
 @router.get("/presets")
 async def presets(_: str = Depends(require_user)) -> dict:
     return {"presets": FIREWALL_PRESETS}
+
+
+@router.get("/drift")
+async def drift(_: str = Depends(require_user)) -> dict:
+    """Managed entries the dashboard wrote that are no longer in the file."""
+    return ShorewallService().drift()
+
+
+@router.post("/restore")
+async def restore(_: str = Depends(require_user)) -> dict:
+    """Re-write the managed blocks from the last snapshot (after an OMR
+    upgrade regenerated /etc/shorewall/rules, for example)."""
+    return ShorewallService().restore_from_snapshot()

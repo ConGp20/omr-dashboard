@@ -81,3 +81,65 @@ def test_close_races_with_in_flight_queries():
     assert store._quotas() == []
     assert store._usage("2099-01") == []
     store.close()          # idempotent
+
+
+# --- schema migrations --------------------------------------------------------
+def _db(tmp_path):
+    from types import SimpleNamespace
+    import services.metrics_store as ms
+    store = ms.MetricsStore.__new__(ms.MetricsStore)
+    store.settings = SimpleNamespace(data_dir=str(tmp_path), db_path=str(tmp_path / "d.db"),
+                                     metrics_retention_days=7)
+    return store
+
+
+def test_fresh_database_lands_on_latest_version(tmp_path):
+    import sqlite3
+    from services.metrics_store import MIGRATIONS, MetricsStore
+    conn = sqlite3.connect(str(tmp_path / "fresh.db"))
+    assert MetricsStore._migrate(conn) == MIGRATIONS[-1][0]
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == MIGRATIONS[-1][0]
+    # Idempotent: a second run applies nothing and changes nothing.
+    assert MetricsStore._migrate(conn) == MIGRATIONS[-1][0]
+
+
+def test_pre_versioning_database_upgrades_without_losing_rows(tmp_path):
+    # Installations from before versioning existed: tables present, version 0.
+    import sqlite3
+    import services.metrics_store as ms
+    path = str(tmp_path / "old.db")
+    conn = sqlite3.connect(path)
+    conn.executescript(ms._SCHEMA)
+    conn.execute("INSERT INTO events (ts, type, detail) VALUES (1, 'keep', 'me')")
+    conn.commit()
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 0
+    assert ms.MetricsStore._migrate(conn) == ms.MIGRATIONS[-1][0]
+    assert conn.execute("SELECT detail FROM events").fetchone() == ("me",)
+
+
+def test_future_migration_applies_exactly_once(tmp_path, monkeypatch):
+    # Simulates the next release adding a column to an existing table — the
+    # case CREATE TABLE IF NOT EXISTS can never handle.
+    import sqlite3
+    import services.metrics_store as ms
+    conn = sqlite3.connect(str(tmp_path / "m.db"))
+    ms.MetricsStore._migrate(conn)                       # at version 1
+    future = ms.MIGRATIONS + [(2, "ALTER TABLE events ADD COLUMN source TEXT DEFAULT 'poller';")]
+    monkeypatch.setattr(ms, "MIGRATIONS", future)
+    assert ms.MetricsStore._migrate(conn) == 2
+    cols = [r[1] for r in conn.execute("PRAGMA table_info(events)")]
+    assert "source" in cols
+    # Running again must not try to add the column a second time.
+    assert ms.MetricsStore._migrate(conn) == 2
+
+
+def test_failed_migration_does_not_advance_version(tmp_path, monkeypatch):
+    import sqlite3
+    import pytest
+    import services.metrics_store as ms
+    conn = sqlite3.connect(str(tmp_path / "f.db"))
+    ms.MetricsStore._migrate(conn)
+    monkeypatch.setattr(ms, "MIGRATIONS", ms.MIGRATIONS + [(2, "ALTER TABLE nope ADD COLUMN x;")])
+    with pytest.raises(sqlite3.OperationalError):
+        ms.MetricsStore._migrate(conn)
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
