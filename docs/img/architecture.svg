@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="700" viewBox="0 0 1200 700" role="img" aria-label="OMR Dashboard architecture: a Docker sidecar on the VPS next to the unchanged OpenMPTCProuter stack">
+  <defs>
+    <marker id="ar-blue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#3b82f6"/></marker>
+    <marker id="ar-green" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#22c55e"/></marker>
+    <marker id="ar-grey" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse"><path d="M0 0 L10 5 L0 10 z" fill="#949eb0"/></marker>
+    <style>
+      text { font-family: Inter, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; }
+      .h { font-size: 15px; font-weight: 700; fill: #e9edf3; }
+      .b { font-size: 14px; font-weight: 600; fill: #e9edf3; }
+      .s { font-size: 12px; fill: #949eb0; }
+      .cap { font-size: 12px; font-weight: 600; fill: #949eb0; letter-spacing: 0.08em; }
+      .box { fill: #131926; stroke: #273042; stroke-width: 1.5; }
+      .box2 { fill: #1c2333; stroke: #273042; stroke-width: 1.5; }
+      .pill { fill: #131926; stroke: #273042; stroke-width: 1.5; }
+      .num { font-size: 12px; font-weight: 700; fill: #0b0f19; }
+    </style>
+  </defs>
+
+  <rect width="1200" height="700" rx="16" fill="#0b0f19"/>
+
+  <!-- ===== Site / LAN ===== -->
+  <rect x="40" y="60" width="300" height="560" rx="14" fill="none" stroke="#273042" stroke-width="1.5" stroke-dasharray="6 5"/>
+  <text x="56" y="88" class="cap">YOUR SITE · LAN</text>
+
+  <rect x="70" y="100" width="240" height="56" rx="10" class="box"/>
+  <text x="90" y="124" class="b">Browser</text>
+  <text x="90" y="144" class="s">opens the dashboard through the tunnel</text>
+
+  <rect x="70" y="236" width="240" height="104" rx="10" class="box"/>
+  <text x="90" y="262" class="b">Router</text>
+  <text x="90" y="282" class="s">OpenMPTCProuter on OpenWrt</text>
+  <text x="90" y="300" class="s">bonds every WAN into one tunnel</text>
+  <text x="90" y="318" class="s">LuCI stays available</text>
+
+  <!-- ===== WAN links ===== -->
+  <text x="380" y="205" class="cap">WAN LINKS · ANY MIX</text>
+  <g>
+    <rect x="380" y="220" width="170" height="40" rx="20" class="pill"/><circle cx="400" cy="240" r="5" fill="#22c55e"/><text x="414" y="245" class="b">DSL</text>
+    <rect x="380" y="280" width="170" height="40" rx="20" class="pill"/><circle cx="400" cy="300" r="5" fill="#22c55e"/><text x="414" y="305" class="b">LTE · 5G</text>
+    <rect x="380" y="340" width="170" height="40" rx="20" class="pill"/><circle cx="400" cy="360" r="5" fill="#f59e0b"/><text x="414" y="365" class="b">Starlink · Cable</text>
+  </g>
+  <!-- router -> WAN -->
+  <path d="M310 288 L380 240 M310 288 L380 300 M310 288 L380 360" fill="none" stroke="#3b4a63" stroke-width="1.5"/>
+  <!-- WAN -> bonded tunnel -> VPS tunnel endpoints -->
+  <path d="M550 240 L660 352 M550 300 L660 352 M550 360 L660 352" fill="none" stroke="#3b82f6" stroke-width="2.5" marker-end="url(#ar-blue)"/>
+  <text x="380" y="404" font-size="12" font-weight="600" fill="#3b82f6">one bonded tunnel · MPTCP</text>
+  <text x="380" y="422" class="s">aggregated bandwidth, seamless failover</text>
+
+  <!-- ===== VPS ===== -->
+  <rect x="640" y="60" width="520" height="560" rx="14" class="box2"/>
+  <text x="660" y="88" class="cap">VPS · OPENMPTCPROUTER (DEBIAN)</text>
+  <text x="1140" y="604" text-anchor="end" class="s">public IPv4/IPv6 exit · optional exit-VPN behind it</text>
+
+  <!-- existing stack -->
+  <text x="660" y="176" class="cap">EXISTING OMR STACK · UNCHANGED</text>
+  <rect x="660" y="188" width="210" height="56" rx="10" class="box"/>
+  <text x="676" y="212" class="b">omr-admin API</text>
+  <text x="676" y="232" class="s">127.0.0.1:65500 · HTTPS</text>
+
+  <rect x="660" y="256" width="210" height="56" rx="10" class="box"/>
+  <text x="676" y="280" class="b">Shorewall firewall</text>
+  <text x="676" y="300" class="s">/etc/shorewall/rules</text>
+
+  <rect x="660" y="324" width="210" height="56" rx="10" class="box"/>
+  <text x="676" y="348" class="b">Tunnel endpoints</text>
+  <text x="676" y="368" class="s">Glorytun · WireGuard · OpenVPN</text>
+
+  <!-- sidecar -->
+  <text x="950" y="88" class="cap">DASHBOARD SIDECAR · DOCKER</text>
+  <rect x="950" y="100" width="190" height="56" rx="10" class="box"/>
+  <text x="966" y="124" class="b">Frontend · Next.js</text>
+  <text x="966" y="144" class="s">BIND_ADDR:3000 (tunnel IP)</text>
+
+  <!-- frontend -> backend, proxy note -->
+  <path d="M1045 156 L1045 418" fill="none" stroke="#949eb0" stroke-width="1.5" marker-end="url(#ar-grey)"/>
+  <text x="1058" y="236" class="s">server-side /api proxy</text>
+  <text x="1058" y="254" class="s">+ SSE live stream</text>
+  <text x="1058" y="286" class="s">the browser never</text>
+  <text x="1058" y="304" class="s">reaches the backend;</text>
+  <text x="1058" y="322" class="s">the admin key never</text>
+  <text x="1058" y="340" class="s">leaves the VPS</text>
+
+  <!-- backend -->
+  <rect x="660" y="420" width="480" height="64" rx="10" class="box"/>
+  <text x="676" y="446" class="b">Backend · FastAPI</text>
+  <text x="676" y="466" class="s">127.0.0.1:65501 · NET_ADMIN · aggregates VPS + router into one API</text>
+
+  <!-- backend -> omr-admin (1) and shorewall (2) -->
+  <path d="M900 420 L900 216 L872 216" fill="none" stroke="#949eb0" stroke-width="1.5" marker-end="url(#ar-grey)"/>
+  <path d="M922 420 L922 284 L872 284" fill="none" stroke="#949eb0" stroke-width="1.5" marker-end="url(#ar-grey)"/>
+  <circle cx="900" cy="200" r="9" fill="#949eb0"/><text x="900" y="204" text-anchor="middle" class="num">1</text>
+  <circle cx="922" cy="268" r="9" fill="#949eb0"/><text x="922" y="272" text-anchor="middle" class="num">2</text>
+
+  <!-- backend -> router ubus (3) -->
+  <path d="M660 452 L190 452 L190 342" fill="none" stroke="#949eb0" stroke-width="1.5" stroke-dasharray="5 4" marker-end="url(#ar-grey)"/>
+  <circle cx="420" cy="452" r="9" fill="#949eb0"/><text x="420" y="456" text-anchor="middle" class="num">3</text>
+  <text x="436" y="446" class="s">router API (LuCI ubus) through the tunnel</text>
+  <text x="436" y="464" class="s">wizard, WAN counters, credential push</text>
+
+  <!-- backend -> sqlite, alerts -->
+  <path d="M775 484 L775 506" fill="none" stroke="#949eb0" stroke-width="1.5" marker-end="url(#ar-grey)"/>
+  <path d="M1025 484 L1025 506" fill="none" stroke="#949eb0" stroke-width="1.5" marker-end="url(#ar-grey)"/>
+  <rect x="660" y="508" width="230" height="56" rx="10" class="box"/>
+  <text x="676" y="532" class="b">SQLite volume</text>
+  <text x="676" y="552" class="s">metrics · events · usage · audit</text>
+  <rect x="910" y="508" width="230" height="56" rx="10" class="box"/>
+  <text x="926" y="532" class="b">Alerts out</text>
+  <text x="926" y="552" class="s">Telegram · webhook · e-mail</text>
+
+  <!-- management tunnel: browser -> frontend -->
+  <path d="M310 128 L948 128" fill="none" stroke="#22c55e" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#ar-green)"/>
+  <text x="380" y="118" font-size="12" font-weight="600" fill="#22c55e">WireGuard management tunnel · 10.255.247.0/24 · the only way in, nothing is exposed publicly</text>
+
+  <!-- legend -->
+  <text x="40" y="652" class="s"><tspan font-weight="700" fill="#e9edf3">1</tspan>  HTTPS with the admin key read from omr-admin-config.json      <tspan font-weight="700" fill="#e9edf3">2</tspan>  managed rule blocks in /etc/shorewall via bind mount, reload + drift check      <tspan font-weight="700" fill="#e9edf3">3</tspan>  LuCI ubus over the tunnel</text>
+  <text x="40" y="676" class="s"><tspan fill="#3b82f6" font-weight="700">━━</tspan> bonded data path      <tspan fill="#22c55e" font-weight="700">╌╌</tspan> management access      <tspan fill="#949eb0" font-weight="700">──</tspan> control calls from the sidecar      the OMR installation itself is not modified</text>
+</svg>

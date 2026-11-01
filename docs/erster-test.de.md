@@ -5,7 +5,7 @@ Er ist so aufgebaut, dass bei jedem Schritt klar ist, **was Erfolg ist** und
 **welche Logs bei einem Fehler helfen**. Reihenfolge einhalten — jeder Schritt
 baut auf dem vorherigen auf.
 
-> Getestet ohne Hardware sind bereits: alle 155 Backend-Tests, die komplette
+> Getestet ohne Hardware sind bereits: alle 169 Backend-Tests, die komplette
 > UI im Browser (15 Seiten + Login-Flow), install.sh, die Shorewall-Datei-
 > verwaltung. Dieser Test prüft erstmals: echte omr-admin-Aufrufe, Router-ubus
 > (Wizard, Zähler), shorewall-Reload, Alarm-Versand.

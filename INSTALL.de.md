@@ -110,7 +110,8 @@ Browser ──/api──▶ Frontend (Next.js :3000) ──▶ Backend (FastAPI 
 Synthetische Daten, kein VPS, kein Router. Ideal um die UI vorab zu sehen.
 
 ```bash
-cd dashboard
+git clone https://github.com/ConGp20/omr-dashboard.git
+cd omr-dashboard
 docker compose -f docker-compose.dev.yml up
 # Browser: http://localhost:3000
 ```
@@ -183,7 +184,8 @@ dem **[Wizard](#der-einrichtungs-wizard-schritt-für-schritt)**.
 Wenn Du das Dashboard getrennt vom Install-Script aufsetzt:
 
 ```bash
-cd dashboard
+git clone https://github.com/ConGp20/omr-dashboard.git
+cd omr-dashboard
 cp .env.example .env
 nano .env                        # Werte setzen (siehe Tabelle unten)
 docker compose up -d --build     # baut beide Images und startet sie
@@ -226,7 +228,7 @@ Für Entwicklung oder Debugging. Zwei Terminals.
 **Backend:**
 
 ```bash
-cd dashboard/backend
+cd omr-dashboard/backend
 python3 -m venv .venv && . .venv/bin/activate
 pip install -r requirements.txt
 
@@ -247,7 +249,7 @@ uvicorn omr_dashboard_api:app --host 127.0.0.1 --port 65501
 **Frontend:**
 
 ```bash
-cd dashboard/frontend
+cd omr-dashboard/frontend
 npm install
 BACKEND_URL=http://127.0.0.1:65501 npm run dev
 # Browser: http://localhost:3000
