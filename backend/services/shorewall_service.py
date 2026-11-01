@@ -30,6 +30,7 @@ In demo mode rules are kept in memory only.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import subprocess
@@ -71,6 +72,10 @@ class ShorewallService:
         self.path = self.settings.shorewall_rules
         # Set by _apply(): "" when the last change is live, else why not.
         self.last_warning = ""
+        # Last known dashboard-managed state. An OMR upgrade can regenerate the
+        # rules file and silently drop our managed blocks; the snapshot lets
+        # the system check notice and the user restore with one click.
+        self.snapshot_path = os.path.join(self.settings.data_dir, "shorewall-managed.json")
 
     # --- port forwarding ---------------------------------------------------
     def list_forwards(self) -> list[PortForward]:
@@ -315,6 +320,7 @@ class ShorewallService:
         out.append(_END)
         with open(self.path, "w") as fh:
             fh.write("\n".join(out) + "\n")
+        self._save_snapshot()
 
     def _apply(self) -> str:
         """Reload shorewall so the rewritten rules file takes effect.
@@ -473,6 +479,64 @@ class ShorewallService:
         out.append(_RULES_END)
         with open(self.path, "w") as fh:
             fh.write("\n".join(out) + "\n")
+        self._save_snapshot()
+
+    # --- drift detection / restore ----------------------------------------
+    def _save_snapshot(self) -> None:
+        try:
+            lines = self._read_lines()
+            data = {
+                "rules": [r.model_dump() for r in self._parse_rules(lines)],
+                "forwards": [f.model_dump() for f in self._parse_forwards(lines)],
+            }
+            os.makedirs(os.path.dirname(self.snapshot_path), exist_ok=True)
+            with open(self.snapshot_path, "w") as fh:
+                json.dump(data, fh)
+        except OSError:
+            _log.warning("Shorewall-Snapshot konnte nicht gespeichert werden", exc_info=True)
+
+    def _load_snapshot(self) -> Optional[dict]:
+        try:
+            with open(self.snapshot_path) as fh:
+                return json.load(fh)
+        except (OSError, json.JSONDecodeError):
+            return None
+
+    def drift(self) -> dict:
+        """Managed entries recorded in the snapshot but gone from the file.
+
+        Non-zero counts almost always mean something outside the dashboard
+        (typically an OMR upgrade) regenerated /etc/shorewall/rules.
+        """
+        if self.settings.demo:
+            return {"rules_missing": 0, "forwards_missing": 0, "snapshot": False}
+        snap = self._load_snapshot()
+        if not snap:
+            return {"rules_missing": 0, "forwards_missing": 0, "snapshot": False}
+        lines = self._read_lines()
+        have_rules = {r.id for r in self._parse_rules(lines)}
+        have_fwds = {f.id for f in self._parse_forwards(lines)}
+        return {
+            "rules_missing": sum(1 for r in snap.get("rules", []) if r.get("id") not in have_rules),
+            "forwards_missing": sum(1 for f in snap.get("forwards", []) if f.get("id") not in have_fwds),
+            "snapshot": True,
+        }
+
+    def restore_from_snapshot(self) -> dict:
+        """Re-write both managed blocks from the snapshot and reload."""
+        if self.settings.demo:
+            return {"restored_rules": 0, "restored_forwards": 0, "warning": ""}
+        snap = self._load_snapshot()
+        if not snap:
+            return {"restored_rules": 0, "restored_forwards": 0, "warning": "Kein Snapshot vorhanden."}
+        rules = [FirewallRule(**r) for r in snap.get("rules", [])]
+        forwards = [PortForward(**f) for f in snap.get("forwards", [])]
+        raw = self._read_lines()
+        self._write_rules(rules, raw)
+        self._write_forwards(forwards, self._read_lines())
+        self._apply()
+        return {"restored_rules": len(rules), "restored_forwards": len(forwards),
+                "warning": self.last_warning}
 
 
 # Common firewall presets surfaced in the UI.

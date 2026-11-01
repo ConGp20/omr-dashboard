@@ -262,3 +262,11 @@ def test_zero_links_is_not_reported_as_single_link():
     assert len(f) == 1
     assert f[0].id == "no_links" and f[0].severity == "warn"
     assert f[0].page == "/system"
+
+
+def test_firewall_drift_is_reported_with_counts():
+    ctx = _ctx(firewall_drift={"rules_missing": 2, "forwards_missing": 1, "snapshot": True})
+    f = advisor.check_firewall_drift(ctx)
+    assert len(f) == 1 and f[0].severity == "warn" and f[0].page == "/firewall"
+    assert "2 Firewall-Regeln" in f[0].detail and "1 Port-Weiterleitung" in f[0].detail
+    assert advisor.check_firewall_drift(_ctx()) == []

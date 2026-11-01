@@ -104,7 +104,8 @@ def create_app() -> FastAPI:
     # would otherwise shadow inside this function's scope.
     @app.get("/health", tags=["meta"])
     async def health_probe() -> dict:
-        return {"status": "ok", "demo": settings.demo, "version": "1.0.0"}
+        return {"status": "ok", "demo": settings.demo, "version": "1.0.0",
+                "schema": deps.get_store().schema_version}
 
     return app
 

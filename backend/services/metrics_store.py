@@ -67,6 +67,18 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts);
 """
 
+# Schema versions, applied in order on top of each other and recorded in
+# SQLite's ``PRAGMA user_version``. The base schema is version 1 and is written
+# with IF NOT EXISTS, so a database created before versioning existed (user
+# version 0, tables already present) upgrades cleanly to 1 without touching
+# its rows. Every later change to an *existing* table — a new column, a new
+# index — must be a new entry here: CREATE TABLE IF NOT EXISTS silently does
+# nothing for a table that already exists, which is exactly how a second
+# release breaks every installation upgraded from the first.
+MIGRATIONS: list[tuple[int, str]] = [
+    (1, _SCHEMA),
+]
+
 
 def current_month() -> str:
     """The current accounting month as ``YYYY-MM`` in UTC."""
@@ -114,8 +126,22 @@ class MetricsStore:
         os.makedirs(self.settings.data_dir, exist_ok=True)
         self._conn = sqlite3.connect(self.settings.db_path, check_same_thread=False)
         self._conn.execute("PRAGMA journal_mode=WAL")
-        self._conn.executescript(_SCHEMA)
-        self._conn.commit()
+        self.schema_version = self._migrate(self._conn)
+
+    @staticmethod
+    def _migrate(conn: sqlite3.Connection) -> int:
+        """Bring the database up to the newest schema version; return it.
+
+        Each pending migration runs in its own transaction, so a failure
+        leaves the version at the last fully applied step instead of half-way.
+        """
+        current = conn.execute("PRAGMA user_version").fetchone()[0]
+        for version, sql in MIGRATIONS:
+            if version <= current:
+                continue
+            conn.executescript("BEGIN;\n" + sql + f"\nPRAGMA user_version = {version};\nCOMMIT;")
+            current = version
+        return current
 
     # --- serialized access -------------------------------------------------
     @contextlib.contextmanager

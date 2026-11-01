@@ -131,10 +131,19 @@ reach it via an SSH tunnel: `ssh -L 3000:127.0.0.1:3000 root@<vps>`.
 
 ```bash
 cd backend && . .venv/bin/activate
-pytest                      # 155 tests, all green (demo + real-mode units)
+pytest                      # 169 tests, all green (demo + real-mode units)
 
 cd ../frontend && npm run build    # type-checks + builds all routes
 ```
+
+The same checks run in CI on every push and pull request (`.github/workflows/ci.yml`),
+plus a Docker build of both images from a clean checkout; Dependabot opens
+weekly PRs for dependency and base-image updates.
+
+Upgrading an installation is `git pull && ./install.sh`: `.env` and the data
+volume are kept, and the SQLite schema is versioned (`PRAGMA user_version`, see
+`MIGRATIONS` in `backend/services/metrics_store.py`), so schema changes in a
+newer release apply to existing databases.
 
 ## Multi-server note (vs. Speedify)
 

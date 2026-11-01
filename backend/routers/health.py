@@ -8,6 +8,7 @@ from config import get_settings
 from deps import get_aggregator, get_store
 from schemas import HealthReport
 from services import advisor, alerts_service
+from services.shorewall_service import ShorewallService
 from services.metrics_store import current_month, month_progress
 
 router = APIRouter(prefix="/health-check", tags=["health"])
@@ -25,6 +26,7 @@ async def health_check(_: str = Depends(require_user)) -> HealthReport:
         alerts=alerts_service.load_config(settings.data_dir),
         bind_addr=advisor.bind_addr_from_env(),
         month_progress=month_progress()[0],
+        firewall_drift=ShorewallService().drift(),
     )
     findings = advisor.evaluate(ctx)
     return HealthReport(

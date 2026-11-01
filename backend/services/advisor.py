@@ -38,6 +38,8 @@ class AdvisorContext:
     bind_addr: str = "127.0.0.1"
     # Fraction of the accounting month elapsed (0..1), for volume projection.
     month_progress: float = 1.0
+    # From ShorewallService.drift(): managed entries missing from the file.
+    firewall_drift: dict[str, Any] = field(default_factory=dict)
 
 
 def _finding(fid: str, severity: str, title: str, detail: str, action: str,
@@ -123,6 +125,27 @@ def check_router_credentials(ctx: AdvisorContext) -> list[Finding]:
         "Unter System → Verbindung das Router-Passwort hinterlegen und die "
         "Verbindung testen.",
         "/system", "connectivity")]
+
+
+def check_firewall_drift(ctx: AdvisorContext) -> list[Finding]:
+    """Dashboard-written firewall entries that vanished from the rules file."""
+    rules = int(ctx.firewall_drift.get("rules_missing") or 0)
+    fwds = int(ctx.firewall_drift.get("forwards_missing") or 0)
+    if not rules and not fwds:
+        return []
+    parts = []
+    if rules:
+        parts.append(f"{rules} Firewall-Regel{'n' if rules != 1 else ''}")
+    if fwds:
+        parts.append(f"{fwds} Port-Weiterleitung{'en' if fwds != 1 else ''}")
+    return [_finding(
+        "firewall_drift", "warn", "Firewall-Einträge aus der Datei verschwunden",
+        f"{' und '.join(parts)} aus dem Dashboard stehen nicht mehr in "
+        "/etc/shorewall/rules. Das passiert, wenn ein OMR-Update die Datei neu "
+        "erzeugt — die Einträge sind dann nicht mehr aktiv.",
+        "Unter Firewall & Ports auf „Wiederherstellen“ klicken; das Dashboard "
+        "schreibt seine Einträge aus dem letzten Stand zurück und lädt Shorewall neu.",
+        "/firewall", "security")]
 
 
 # --------------------------------------------------------------------------- #
@@ -334,6 +357,7 @@ CHECKS: list[Callable[[AdvisorContext], list[Finding]]] = [
     check_dashboard_password,
     check_bind_address,
     check_router_credentials,
+    check_firewall_drift,
     check_tunnel,
     check_link_count,
     check_poor_links,

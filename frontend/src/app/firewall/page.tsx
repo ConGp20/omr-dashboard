@@ -20,6 +20,9 @@ const EMPTY: FirewallRule = {
 export default function FirewallPage() {
   const presets = useApi<{ presets: Preset[] }>("/firewall/presets");
   const rules = useApi<FirewallRule[]>("/firewall/rules");
+  // Entries the dashboard wrote that are no longer in the rules file — an OMR
+  // upgrade regenerating /etc/shorewall/rules is the usual cause.
+  const drift = useApi<{ rules_missing: number; forwards_missing: number }>("/firewall/drift");
   const [form, setForm] = useState<FirewallRule>(EMPTY);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
@@ -72,6 +75,22 @@ export default function FirewallPage() {
   };
 
   const openPorts = new Set((rules.data ?? []).map((r) => `${r.port}/${r.proto}`));
+  const missing = (drift.data?.rules_missing ?? 0) + (drift.data?.forwards_missing ?? 0);
+
+  const restore = async () => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const res = await api.post<{ restored_rules: number; restored_forwards: number; warning: string }>("/firewall/restore");
+      rules.refetch();
+      drift.refetch();
+      setMsg(res.warning || `Wiederhergestellt: ${res.restored_rules} Regel(n), ${res.restored_forwards} Weiterleitung(en).`);
+    } catch (e) {
+      setMsg(`Fehler: ${(e as Error).message}`);
+    } finally {
+      setBusy(false);
+    }
+  };
 
   return (
     <div>
@@ -81,6 +100,16 @@ export default function FirewallPage() {
         action={<OwnerBadge owner="vps" />}
       />
 
+      {missing > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-warn/40 bg-warn/10 px-3 py-2.5 text-sm text-fg">
+          <span className="flex-1">
+            {missing} Eintrag{missing === 1 ? "" : "e"} aus dem Dashboard {missing === 1 ? "fehlt" : "fehlen"} in
+            der Shorewall-Datei — vermutlich hat ein OMR-Update sie neu erzeugt. Die Einträge sind
+            derzeit <strong>nicht aktiv</strong>.
+          </span>
+          <Button size="sm" onClick={restore} disabled={busy}>Wiederherstellen</Button>
+        </div>
+      )}
       {msg && (
         <div className={`mb-4 rounded-lg border px-3 py-2 text-sm ${
           msg.startsWith("Gespeichert, aber nicht aktiv") || msg.startsWith("Fehler")
